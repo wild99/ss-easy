@@ -93,18 +93,22 @@ ok "install completed"
 # --- 2) file-permission assertions (Decision 10) ----------------------------
 log "asserting file permissions"
 [ -d /etc/ss-easy ] || fail "/etc/ss-easy missing"
-[ "$(stat -c '%a' /etc/ss-easy)" = "700" ] || fail "/etc/ss-easy not 0700 (got $(stat -c '%a' /etc/ss-easy))"
+# Dir 0710 root:ss-easy — the unprivileged service user may TRAVERSE to its config.
+[ "$(stat -c '%a' /etc/ss-easy)" = "710" ] || fail "/etc/ss-easy not 0710 (got $(stat -c '%a' /etc/ss-easy))"
 [ "$(stat -c '%U' /etc/ss-easy)" = "root" ] || fail "/etc/ss-easy not root-owned"
-for f in /etc/ss-easy/users.json /etc/ss-easy/config.json; do
-  [ -f "$f" ] || fail "$f missing"
-  [ "$(stat -c '%a' "$f")" = "600" ] || fail "$f not 0600 (got $(stat -c '%a' "$f"))"
-  [ "$(stat -c '%U' "$f")" = "root" ] || fail "$f not root-owned"
-done
+# users.json: secret registry — stays 0600 root-only (never read by the service).
+[ -f /etc/ss-easy/users.json ] || fail "users.json missing"
+[ "$(stat -c '%a' /etc/ss-easy/users.json)" = "600" ] || fail "users.json not 0600 (got $(stat -c '%a' /etc/ss-easy/users.json))"
+[ "$(stat -c '%U' /etc/ss-easy/users.json)" = "root" ] || fail "users.json not root-owned"
+# config.json: 0640 root:ss-easy — group-readable so the service user can load it.
+[ -f /etc/ss-easy/config.json ] || fail "config.json missing"
+[ "$(stat -c '%a' /etc/ss-easy/config.json)" = "640" ] || fail "config.json not 0640 (got $(stat -c '%a' /etc/ss-easy/config.json))"
+[ "$(stat -c '%U' /etc/ss-easy/config.json)" = "root" ] || fail "config.json not root-owned"
 # Per-user access file (carries the secret) must be 0600 root-owned.
 acc="/etc/ss-easy/users/t0.txt"
 [ -f "$acc" ] || fail "access file $acc missing"
 [ "$(stat -c '%a' "$acc")" = "600" ] || fail "$acc not 0600 (got $(stat -c '%a' "$acc"))"
-ok "permissions: dir 0700, secret files 0600 root-owned"
+ok "permissions: dir 0710, config.json 0640 (service-readable), secrets 0600 root-owned"
 
 # config.json is valid JSON and consumable by ssserver.
 jq -e . /etc/ss-easy/config.json >/dev/null || fail "config.json is not valid JSON"
