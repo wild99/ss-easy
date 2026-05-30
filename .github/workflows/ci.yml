@@ -74,7 +74,7 @@ jobs:
 
   # Fail if any git-tracked file matches a .gitignore pattern (artifact leak).
   # `git ls-files -ci --exclude-standard` lists tracked-but-ignored files; a
-  # non-empty result means an ignored artifact (work/, tmp/, *.log, dist/, ...)
+  # non-empty result means an ignored artifact (work/, tmp/, *.log, ...)
   # leaked into the repo. NOTE: `git check-ignore --stdin` is the WRONG tool here
   # — it silently passes already-tracked files, so the gate would always be green.
   gitignore-leak:

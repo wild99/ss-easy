@@ -30,7 +30,7 @@
 #   before executing a single byte (verify-before-exec).
 #
 # Usage (the README one-liner):
-#   curl -fsSL https://raw.githubusercontent.com/youruser/ss-easy/<tag>/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/<tag>/install.sh | sudo bash
 # Flags after `bash` (or `bash -s --`) are forwarded verbatim to `ss-easy install`:
 #   curl -fsSL .../install.sh | sudo bash -s -- --silent
 
@@ -42,7 +42,7 @@ set -euo pipefail
 # released git tag — NEVER a moving branch — so the bytes we download and verify
 # are immutable. Override via the environment only for CI/self-test against a
 # local fixture host (never to relax integrity).
-: "${SS_EASY_REPO:=youruser/ss-easy}"
+: "${SS_EASY_REPO:=wild99/ss-easy}"
 : "${SS_EASY_TAG:=v1.0.0}"
 
 # Base URL for the tag-pinned raw repo content (the bundle + its checksum live in

@@ -1,170 +1,183 @@
 # ss-easy
 
-Turnkey [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust)
-installer and manager for Linux servers — a single pure-bash tool that installs
-the proxy, manages users, and hands you ready-to-import `ss://` links.
+Turnkey installer and manager for a [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust)
+server. One command sets up a working server, prints a ready-to-use `ss://` link
+and QR code, and gives you a friendly menu (TUI) plus a scriptable CLI to manage
+users and the service — no Linux expertise required.
 
-One command sets up a hardened, systemd-managed Shadowsocks server with a
-dedicated unprivileged service user, sane firewall rules, BBR, and a first user.
-Everything after that — adding/removing users, viewing links and QR codes — is a
-single subcommand or an interactive menu.
+- **One-command install** (interactive or fully silent/unattended)
+- **Per-user access** — each user gets their own port, password/key, `ss://` link and QR
+- **CLI** for automation and **whiptail TUI** for click-through management
+- **Modern crypto** — `2022-blake3-aes-256-gcm` by default, `chacha20-ietf-poly1305` fallback
+- **Hardened by default** — checksum-verified binary, firewall auto-config (your SSH stays open), BBR, non-root service, strict file permissions
+- **Debian/Ubuntu + RHEL family (CentOS/Rocky/Alma)**, `amd64` and `arm64`
 
-## What it does
+> ⚠️ Requires a Linux server with **systemd** and **root** access. Intended for VPS hosts.
 
-- Installs the pinned, checksum-verified `ssserver` binary (musl static build).
-- Generates `/etc/ss-easy/config.json` from a single source-of-truth registry
-  (`/etc/ss-easy/users.json`); every change regenerates the config and reloads
-  the service.
-- Manages users: `user add`, `user del`, `user list`, `user show` — each with a
-  crypto-random secret, an auto-allocated high port, an `ss://` link, and a
-  terminal QR code.
-- Hardened systemd unit (`NoNewPrivileges`, `ProtectSystem=strict`, read-only
-  config bind), runs as a dedicated non-root user.
-- Opens only the user's port in the firewall (ufw or firewalld); never touches
-  your SSH rule.
-- Auto-detects the public IP across several HTTPS sources (with confirmation in
-  interactive mode), and enables BBR.
-- Clean `uninstall` that removes everything ss-easy installed and leaves the rest
-  of the box (and SSH) untouched.
+---
 
-## Quick start
+## Install
 
-`ss-easy` ships as a single self-contained bundle, pinned to a release tag and
-published with a SHA256 checksum. The bootstrap downloads that tagged bundle,
-**verifies its checksum before executing it**, installs it to
-`/usr/local/bin/ss-easy`, and runs the installer.
+### Quick start (one-liner)
 
-Replace `<tag>` with the release you want (e.g. `v1.0.0`):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/youruser/ss-easy/<tag>/install.sh | sudo bash
+```bash
+curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.0/install.sh | sudo bash
 ```
 
-Pass installer flags after `bash -s --` (e.g. fully unattended install):
+This downloads the version-pinned, **SHA256-verified** bundle, installs the
+dependencies and the shadowsocks-rust binary, creates your first user, opens the
+firewall, enables BBR, starts the service, and prints the connection link + QR.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/youruser/ss-easy/<tag>/install.sh | sudo bash -s -- --silent
+### Silent / unattended install
+
+Flags after `bash -s --` are forwarded to `ss-easy install`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.0/install.sh | sudo bash -s -- --silent
 ```
 
-The bootstrap uses a hardened `curl` (`--fail --proto '=https' --tlsv1.2`, no
-`-k`) and aborts without installing anything if the download fails or the
-checksum does not match.
+Silent mode asks nothing and uses safe defaults (random high port, crypto-random
+secret, auto-detected public IP). Override any of them:
 
-### Git-clone alternative
+```bash
+... | sudo bash -s -- --silent --port 8443 --method chacha20-ietf-poly1305 --name alice
+```
 
-If you prefer to inspect the source first (recommended for `curl | bash` of any
-root script):
+### Alternative: clone and review first (recommended for the cautious)
 
-```sh
-git clone https://github.com/youruser/ss-easy.git
+```bash
+git clone https://github.com/wild99/ss-easy.git
 cd ss-easy
-git checkout <tag>
-
-# Option A: run the bootstrap from the clone (same verify-then-install path):
-sudo bash install.sh --silent
-
-# Option B: build and run the bundle directly (skips the download + checksum):
-bash build.sh
-sudo ./dist/ss-easy install --silent
+sudo ./ss-easy install
 ```
 
-### Manually verifying the checksum
+### Verify the download manually (optional)
 
-The bootstrap verifies automatically; to check by hand before trusting it:
+The bundle's checksum is committed next to it and re-verified in CI:
 
-```sh
-tag=<tag>
-base="https://raw.githubusercontent.com/youruser/ss-easy/$tag"
-curl -fsSL "$base/dist/ss-easy"               -o ss-easy
-curl -fsSL "$base/checksums/bootstrap.sha256" -o bootstrap.sha256
-sha256sum -c bootstrap.sha256        # must print: ss-easy: OK
+```bash
+tag=v1.0.0
+base="https://raw.githubusercontent.com/wild99/ss-easy/$tag"
+curl -fsSL "$base/dist/ss-easy" -o ss-easy
+curl -fsSL "$base/checksums/bootstrap.sha256" | sed "s#dist/##" | sha256sum -c -
 ```
 
-> **Note on the checksum:** the build is **not** byte-reproducible, so the hash
-> in `checksums/bootstrap.sha256` is valid only for the exact `dist/ss-easy`
-> artifact published for a given tag. It is regenerated and committed by the
-> release pipeline on every version bump:
->
-> ```sh
-> sha256sum dist/ss-easy | sed 's#dist/##' > checksums/bootstrap.sha256
-> ```
->
-> A local `bash build.sh` will produce a different hash; the published value is
-> the canonical one the bootstrap checks against.
+---
 
 ## Usage
 
-```sh
-ss-easy                       # interactive menu (whiptail)
-ss-easy install [--silent]    # install + first user
-ss-easy user add alice        # add a user, print its ss:// link + QR
-ss-easy user list             # list users (no secrets)
-ss-easy user show alice       # connection details + ss:// link for one user
-ss-easy user del alice        # remove a user
-ss-easy status                # service status
-ss-easy uninstall             # remove everything ss-easy installed
+After install, `ss-easy` lives at `/usr/local/bin/ss-easy`.
+
+### TUI (easiest)
+
+```bash
+sudo ss-easy            # or: sudo ss-easy tui
 ```
 
-Run `ss-easy --help` for the full command list.
+A menu lets you manage the service, add/remove users, view connection links + QR
+codes, see server info, and uninstall — without typing any commands.
 
-## Supported distros and architectures
+### Manage users (CLI)
 
-**Distributions** (systemd required):
-
-- Debian / Ubuntu (apt family)
-- CentOS / Rocky Linux / AlmaLinux (dnf/yum family)
-
-**Architectures:** `x86_64` and `aarch64` (the pinned musl static ssserver build
-ships for both). Other architectures are rejected with a clear error.
-
-ss-easy manages a real systemd service, so it must run on a normal VPS/host with
-systemd as the init system — not inside a minimal container without an init.
-
-## Cipher notes
-
-The default cipher is **`2022-blake3-aes-256-gcm`** (Shadowsocks AEAD-2022, the
-modern SIP022 scheme). It is the strongest, recommended choice and what you
-should use unless a specific client cannot speak it.
-
-SIP022 links are structurally different from classic links: the userinfo is the
-literal `method:key` (the key is a 32-byte value in standard base64), not a
-base64-encoded password. ss-easy emits the correct format per cipher
-automatically.
-
-If you have an older client that does not support the 2022 ciphers, use the
-classic fallback **`chacha20-ietf-poly1305`** (SIP002), which is widely
-supported:
-
-```sh
-ss-easy user add legacy --method chacha20-ietf-poly1305
+```bash
+sudo ss-easy user add alice      # create a user → prints ss:// link + QR, saves an access file
+sudo ss-easy user list           # list users (name, port, method)
+sudo ss-easy user show alice     # reprint a user's ss:// link + QR
+sudo ss-easy user del alice      # remove a user (closes its port)
 ```
 
-| Cipher | Scheme | When to use |
-|-|-|-|
-| `2022-blake3-aes-256-gcm` (default) | SIP022 / AEAD-2022 | Default; modern clients |
-| `chacha20-ietf-poly1305` | SIP002 / classic AEAD | Older clients without 2022 support |
+Each user's access details are also saved to `/etc/ss-easy/users/<name>.txt`.
 
-### Client requirements
+### Manage the service (CLI)
 
-To import the generated `ss://` link or scan its QR code:
+```bash
+sudo ss-easy status
+sudo ss-easy start | stop | restart
+sudo ss-easy enable | disable     # start on boot (or not)
+```
 
-- **2022-blake3 (default):** a current Shadowsocks client that supports
-  AEAD-2022 / SIP022 — e.g. Shadowrocket (iOS), v2rayN (Windows), Clash Meta /
-  Mihomo, sing-box, the official shadowsocks-rust client, or a recent
-  shadowsocks-android. Older clients will silently fail on a 2022 link.
-- **chacha20-ietf-poly1305 (fallback):** virtually any modern Shadowsocks client,
-  including older ones that predate AEAD-2022.
+### Uninstall
 
-## Security note: `curl | bash`
+```bash
+sudo ss-easy uninstall            # removes service, config, users, binary and the firewall rules it added
+```
 
-Piping any script to `bash` as root is a trust decision. ss-easy reduces the risk
-with tag pinning plus a published SHA256 that the bootstrap verifies **before**
-executing the bundle (so a swapped release asset, a moved branch, or a corrupted
-download is rejected, not run). TLS protects the transport; the checksum protects
-integrity. If you would rather not trust the pipe at all, use the **git-clone
-alternative** above and read the source first — it is plain bash with no
-dependencies beyond `curl`, `jq`, and standard tools.
+`--silent`/`--yes` skips the confirmation prompt. Your SSH rule is never touched.
+
+---
+
+## Connecting a client
+
+Use the printed `ss://` link or scan the QR code in any shadowsocks client
+(Outline, Shadowrocket, v2rayN, Clash, etc.).
+
+**Cipher compatibility:** the default `2022-blake3-aes-256-gcm` (SIP022) requires
+a reasonably recent client. If your client is older, create the user with the
+classic fallback:
+
+```bash
+sudo ss-easy user add bob --method chacha20-ietf-poly1305
+```
+
+---
+
+## What it sets up
+
+| Item | Location / detail |
+|-|-|
+| CLI/TUI command | `/usr/local/bin/ss-easy` |
+| User registry (source of truth) | `/etc/ss-easy/users.json` (`0600`) |
+| shadowsocks-rust config (generated) | `/etc/ss-easy/config.json` (`0600`) |
+| Per-user access files | `/etc/ss-easy/users/<name>.txt` (`0600`) |
+| systemd unit | `ss-easy.service` (runs as a dedicated unprivileged user) |
+| Proxy binary | `/usr/local/bin/ssserver` (checksum-verified) |
+
+All state lives under `/etc/ss-easy` (`0700`). The CLI and TUI share one source of
+truth, so they never disagree.
+
+---
+
+## Security notes
+
+- **`curl | bash` runs code as root.** The code is open and readable — review it,
+  or use the `git clone` flow. The shadowsocks-rust binary is pinned to a known
+  release and verified against a committed SHA256 before install; the bootstrap
+  bundle is likewise verified before it executes.
+- **Your firewall/SSH is safe.** ss-easy only adds/removes rules for its own user
+  ports (ufw/firewalld). It never modifies your SSH rule and never enables a
+  firewall from scratch without consent.
+- **Secrets** are generated from a cryptographic source and stored with strict
+  permissions; they are never written to logs.
+- **The proxy does not run as root** — it runs under a dedicated unprivileged
+  system user with systemd hardening.
+
+---
+
+## Supported systems
+
+- **OS:** Debian/Ubuntu (`apt`), CentOS/Rocky/Alma (`dnf`/`yum`). Requires systemd.
+- **Arch:** `amd64` (x86_64) and `arm64` (aarch64).
+- **Runtime deps** (installed automatically): `whiptail` (RHEL: `newt`), `qrencode`, `jq`, `curl`.
+
+---
+
+## Development
+
+Pure Bash, organized as `lib/*.sh` modules bundled by `build.sh` into the single
+distributable `dist/ss-easy`.
+
+```bash
+bash build.sh                 # assemble dist/ss-easy
+shellcheck ss-easy lib/*.sh   # lint
+bats tests/                   # unit tests
+```
+
+CI runs shellcheck, the bats suite, a deterministic-build/checksum gate, and real
+Docker integration on Debian + Rocky (full lifecycle + end-to-end proxy smoke for
+both ciphers).
+
+---
 
 ## License
 
-See the repository for license details.
+[MIT](LICENSE)
