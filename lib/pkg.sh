@@ -9,7 +9,12 @@
 #                                   die if none is available
 #   pkg_install <pkgs...>           install the given packages non-interactively
 #                                   and idempotently; no packages == no-op success
-#   pkg_ensure_runtime_deps         install exactly: whiptail qrencode curl jq
+#   pkg_ensure_runtime_deps         install the runtime deps for the host family:
+#                                     deb : whiptail qrencode jq curl
+#                                     rhel: newt qrencode jq  (no curl: curl-minimal
+#                                           is already present and `curl` conflicts
+#                                           with it; whiptail CLI ships in `newt`;
+#                                           qrencode lives in EPEL, enabled first)
 #
 # Manager selection prefers the family detected by preflight (SS_DISTRO_FAMILY);
 # when that is unset it falls back to whichever manager binary is on PATH.
@@ -39,9 +44,20 @@ if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
 fi
 # build:strip-end
 
-# Runtime dependencies (tech-spec Dependencies + Decision 7: jq). Same package
-# names on apt and dnf/yum, so no per-family name mapping is needed today.
-SS_RUNTIME_DEPS="whiptail qrencode curl jq"
+# Runtime dependencies, per distro family — the CLI tools the tool needs are
+# whiptail, qrencode, jq and curl, but the PACKAGES that provide them differ:
+#
+#   deb  : whiptail qrencode jq curl   (all four exist by name in apt)
+#   rhel : newt qrencode jq            (the whiptail CLI ships in `newt`, not a
+#                                       `whiptail` package; curl is INTENTIONALLY
+#                                       omitted — RHEL ships `curl-minimal`, which
+#                                       already provides curl and conflicts with
+#                                       the `curl` package; `qrencode` is in EPEL)
+#
+# Verified on rockylinux:9: `newt` + `qrencode` (EPEL) + `jq` install cleanly and
+# `whiptail` ends up on PATH from `newt`.
+SS_RUNTIME_DEPS_DEB="whiptail qrencode jq curl"
+SS_RUNTIME_DEPS_RHEL="newt qrencode jq"
 
 # --- detect -----------------------------------------------------------------
 
@@ -98,11 +114,49 @@ pkg_install() {
 
 # --- ensure runtime deps ----------------------------------------------------
 
-# pkg_ensure_runtime_deps — install exactly the runtime dependencies the tool
-# needs. Idempotent: re-running on a fully provisioned host is a no-op success.
+# _pkg_family — resolve the distro family (deb|rhel). Honours SS_DISTRO_FAMILY
+# from preflight; when unset, infers it from the active package manager so the
+# correct per-family package list is still chosen. Prints deb|rhel, or nothing.
+_pkg_family() {
+  case "${SS_DISTRO_FAMILY:-}" in
+    deb)  printf 'deb';  return 0 ;;
+    rhel) printf 'rhel'; return 0 ;;
+  esac
+  # Unset: infer from the manager on PATH.
+  case "$(pkg_detect_manager 2>/dev/null)" in
+    apt-get) printf 'deb' ;;
+    dnf|yum) printf 'rhel' ;;
+  esac
+}
+
+# pkg_ensure_runtime_deps — install the runtime dependencies the tool needs,
+# using the PER-FAMILY package list (package names differ across deb and rhel).
+# On rhel, `qrencode` lives in EPEL, so epel-release is enabled first (idempotent
+# no-op if already installed). Idempotent overall: re-running on a fully
+# provisioned host is a no-op success.
 pkg_ensure_runtime_deps() {
-  # Word-splitting of SS_RUNTIME_DEPS is intentional: it is a fixed, internal
+  local family deps
+  family="$(_pkg_family)"
+
+  case "$family" in
+    rhel)
+      # qrencode is not in BaseOS/AppStream; EPEL provides it. Enable EPEL first
+      # so the subsequent install can resolve it. Installing epel-release when it
+      # is already present is a no-op for dnf/yum.
+      log_info "enabling EPEL (provides qrencode on RHEL family)"
+      pkg_install epel-release || return $?
+      deps="$SS_RUNTIME_DEPS_RHEL"
+      ;;
+    deb)
+      deps="$SS_RUNTIME_DEPS_DEB"
+      ;;
+    *)
+      die "pkg_ensure_runtime_deps: cannot determine distro family (deb|rhel)."
+      ;;
+  esac
+
+  # Word-splitting of the chosen list is intentional: a fixed, internal
   # space-separated list of package names with no special characters.
   # shellcheck disable=SC2086
-  pkg_install $SS_RUNTIME_DEPS
+  pkg_install $deps
 }

@@ -122,21 +122,47 @@ make_logging_stub() {
 
 # --- ensure runtime deps ----------------------------------------------------
 
-@test "ensure_runtime_deps: passes exactly whiptail qrencode curl jq (apt)" {
+@test "ensure_runtime_deps (deb): exactly whiptail qrencode jq curl, no newt" {
   make_logging_stub apt-get
   run bash -c "PATH=\"$STUB_DIR:\$PATH\"; source '$PKG'; SS_DISTRO_FAMILY=deb pkg_ensure_runtime_deps"
   [ "$status" -eq 0 ]
   line="$(grep 'install -y' "$LOG")"
-  # Exactly the four deps after 'install -y'.
   pkgs="${line#*install -y }"
-  [ "$pkgs" = "whiptail qrencode curl jq" ]
+  [ "$pkgs" = "whiptail qrencode jq curl" ]
+  [[ "$pkgs" != *"newt"* ]]
+  [[ "$pkgs" != *"epel"* ]]
 }
 
-@test "ensure_runtime_deps: same four packages on rhel (dnf)" {
+@test "ensure_runtime_deps (rhel): enables EPEL then installs newt qrencode jq, NO curl, NO whiptail pkg" {
   make_logging_stub dnf
   run bash -c "PATH=\"$STUB_DIR:\$PATH\"; source '$PKG'; SS_DISTRO_FAMILY=rhel pkg_ensure_runtime_deps"
   [ "$status" -eq 0 ]
+  # First install call enables EPEL.
+  epel_line="$(grep 'install -y' "$LOG" | head -n1)"
+  [[ "$epel_line" == *"epel-release"* ]]
+  # The runtime-deps install is the line carrying the actual deps.
+  deps_line="$(grep 'install -y' "$LOG" | grep -v epel-release)"
+  pkgs="${deps_line#*install -y }"
+  [ "$pkgs" = "newt qrencode jq" ]
+  # curl is NOT requested (curl-minimal conflict) and there is no `whiptail` pkg.
+  [[ "$pkgs" != *"curl"* ]]
+  [[ "$pkgs" != *"whiptail"* ]]
+}
+
+@test "ensure_runtime_deps infers deb family from apt when SS_DISTRO_FAMILY unset" {
+  make_logging_stub apt-get
+  run bash -c "PATH='$STUB_DIR'; source '$PKG'; pkg_ensure_runtime_deps"
+  [ "$status" -eq 0 ]
   line="$(grep 'install -y' "$LOG")"
   pkgs="${line#*install -y }"
-  [ "$pkgs" = "whiptail qrencode curl jq" ]
+  [ "$pkgs" = "whiptail qrencode jq curl" ]
+}
+
+@test "ensure_runtime_deps infers rhel family from dnf when SS_DISTRO_FAMILY unset" {
+  make_logging_stub dnf
+  run bash -c "PATH='$STUB_DIR'; source '$PKG'; pkg_ensure_runtime_deps"
+  [ "$status" -eq 0 ]
+  deps_line="$(grep 'install -y' "$LOG" | grep -v epel-release)"
+  pkgs="${deps_line#*install -y }"
+  [ "$pkgs" = "newt qrencode jq" ]
 }

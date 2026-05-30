@@ -43,8 +43,11 @@ export SS_EASY_USERS="${SS_EASY_ETC}/users.json"
 export SS_EASY_CONFIG="${SS_EASY_ETC}/config.json"
 export SS_EASY_USERS_DIR="${SS_EASY_ETC}/users"
 
-# Directory holding the repo-committed SHA256 table for the pinned ss-rust
-# binary. Reserved here; populated in Task 3.
+# Repo directory holding the human/CI-readable SHA256 table for the pinned
+# ss-rust binary (checksums/ss-rust.sha256). This is the SOURCE OF TRUTH; the
+# installed single-file bundle does NOT read it (it verifies against the hashes
+# embedded in binary.sh, which build.sh keeps in sync from this file). Relative
+# path: meaningful only from the repo root in dev/CI, never at install time.
 export SS_EASY_CHECKSUMS_DIR="checksums"
 
 # Single systemd unit running ssserver against the generated config.

@@ -33,10 +33,10 @@ if [ -n "${_SS_EASY_BINARY_LOADED:-}" ]; then
 fi
 _SS_EASY_BINARY_LOADED=1
 
-# Depend on common.sh (die, logging, SS_RUST_VERSION, SS_SERVER_BIN,
-# SS_EASY_CHECKSUMS_DIR). In the assembled bundle the modules are inlined and
-# the guard is already set, so this is a no-op; in dev/test we source our
-# sibling so the module is usable standalone.
+# Depend on common.sh (die, logging, SS_RUST_VERSION, SS_SERVER_BIN). In the
+# assembled bundle the modules are inlined and the guard is already set, so this
+# is a no-op; in dev/test we source our sibling so the module is usable
+# standalone.
 # build:strip-start
 if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
   _ss_bin_self="${BASH_SOURCE[0]}"
@@ -47,6 +47,34 @@ if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
   unset _ss_bin_self _ss_bin_dir
 fi
 # build:strip-end
+
+# --- embedded checksum table ------------------------------------------------
+#
+# Expected SHA256 of each pinned ss-rust release asset, keyed by Rust target
+# triple. These are EMBEDDED so the single-file bundle verifies the download
+# with NO sibling files (the installed /usr/local/bin/ss-easy has no checksums/
+# dir). The repo file checksums/ss-rust.sha256 stays the human/CI-readable
+# source of truth; build.sh keeps the values below in sync from it on each build
+# (see _ss_sync_embedded_checksums in build.sh), and the bats suite asserts they
+# match. Bumping SS_RUST_VERSION updates checksums/ss-rust.sha256, then `bash
+# build.sh` refreshes these constants.
+#
+# EMBEDDED-CHECKSUMS:BEGIN (managed by build.sh — do not edit by hand)
+_SS_RUST_SHA256_x86_64_unknown_linux_musl="d37e9f6484aced51188ed6c8beea3538be7a73b072259b65a47e91ebf6530dfc"
+_SS_RUST_SHA256_aarch64_unknown_linux_musl="42ec15a594dd61b5eae9feb6d7819405e7bd261b8c4cceeda0b6bc7f8b05395f"
+# EMBEDDED-CHECKSUMS:END
+
+# ss_expected_sha256 <triple> — print the embedded expected SHA256 for <triple>.
+# Returns non-zero (no output) if there is no embedded entry for that triple.
+ss_expected_sha256() {
+  local triple="${1:?ss_expected_sha256: triple required}"
+  # Map the triple to its constant name: dashes/dots are not valid in bash
+  # identifiers, so the constants use underscores. Indirect-expand the result.
+  local key="_SS_RUST_SHA256_${triple//[-.]/_}"
+  local val="${!key:-}"
+  [ -n "$val" ] || return 1
+  printf '%s' "$val"
+}
 
 # Upstream release-asset base URL for the pinned tag. Overridable in tests to
 # point at a local fixture host; never used to relax the curl protocol guard.
@@ -121,15 +149,15 @@ ss_download_url() {
 # to SS_SERVER_BIN (0755). Idempotent (overwrites an existing binary). Any
 # failure removes all temp artifacts and returns non-zero (no partial install).
 ss_install_binary() {
-  local triple asset url checksums tmpdir archive extract_root
+  local triple asset url expected tmpdir archive extract_root
   triple="$(ss_detect_arch)" || return $?
   asset="shadowsocks-${SS_RUST_VERSION}.${triple}.tar.xz"
   url="${SS_RELEASE_BASE_URL}/${asset}"
-  checksums="${SS_EASY_CHECKSUMS_DIR}/ss-rust.sha256"
 
-  if [ ! -f "$checksums" ]; then
-    die "checksum table not found: ${checksums}"
-  fi
+  # Resolve the expected hash from the EMBEDDED table so a single-file install
+  # (no sibling checksums/ dir) verifies. No embedded entry -> refuse to install.
+  expected="$(ss_expected_sha256 "$triple")" || \
+    die "no embedded SHA256 for ${triple}: cannot verify ss-rust ${SS_RUST_VERSION}."
 
   # Single scratch dir for the archive and extraction; one trap cleans it all,
   # so every error path (download, verify, extract) leaves nothing behind.
@@ -147,15 +175,11 @@ ss_install_binary() {
     die "failed to download ss-rust ${SS_RUST_VERSION} for ${triple}"
   fi
 
-  # Verify against the repo-committed hash. Pull just the line for this asset so
-  # sha256sum -c checks exactly our archive (full-hash compare, no substrings).
+  # Verify against the EMBEDDED hash. Feed `<hash>  <asset>` to `sha256sum -c`
+  # from tmpdir so it checks exactly our archive by name (full-hash compare, no
+  # substrings, no external file needed).
   log_info "verifying SHA256 of ${asset}"
-  local expected_line
-  expected_line="$(grep -F "  ${asset}" "$checksums" || true)"
-  if [ -z "$expected_line" ]; then
-    die "no SHA256 entry for ${asset} in ${checksums}"
-  fi
-  if ! ( cd "$tmpdir" && printf '%s\n' "$expected_line" | sha256sum -c --status - ); then
+  if ! ( cd "$tmpdir" && printf '%s  %s\n' "$expected" "$asset" | sha256sum -c --status - ); then
     die "SHA256 mismatch for ${asset}: refusing to install (possible tampered or wrong asset)"
   fi
 

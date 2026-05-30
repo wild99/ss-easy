@@ -6,6 +6,11 @@
 # Network, uname, curl, sha256sum and tar are all mocked via PATH stubs or by
 # pointing the module at a file:// "release host" served from a temp dir; no real
 # network is touched and no real ssserver is fetched.
+#
+# The SHA256 the installer trusts is the EMBEDDED constant
+# _SS_RUST_SHA256_<triple>; make_release computes the real archive hash and
+# exports that constant so the self-contained verification path is exercised
+# WITHOUT any sibling checksums/ file.
 
 setup() {
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
@@ -35,9 +40,10 @@ make_logging_stub() {
   chmod +x "$STUB_DIR/$name"
 }
 
-# Build a real .tar.xz containing a fake ssserver binary, plus its matching
-# checksums/ss-rust.sha256 line for the given triple, served from HOST_DIR.
-# Usage: make_release <triple>
+# Build a real .tar.xz containing a fake ssserver binary, served from HOST_DIR,
+# and emit the bash assignment that pins its EMBEDDED expected hash for the
+# given triple. Callers eval the printed assignment inside the install subshell.
+# Usage: eval "$(make_release <triple>)"
 make_release() {
   local triple="$1"
   local asset="shadowsocks-v1.23.5.${triple}.tar.xz"
@@ -48,9 +54,10 @@ make_release() {
   # sslocal/ssservice ship alongside in the real archive; include extras.
   printf '#!/bin/sh\n:\n' > "$stage/sslocal"; chmod +x "$stage/sslocal"
   tar -C "$stage" -cJf "$HOST_DIR/$asset" .
-  local sum
+  local sum key
   sum="$(sha256sum "$HOST_DIR/$asset" | awk '{print $1}')"
-  printf '%s  %s\n' "$sum" "$asset" >> "$CHK_DIR/ss-rust.sha256"
+  key="_SS_RUST_SHA256_${triple//[-.]/_}"
+  printf '%s=%s\n' "$key" "$sum"
 }
 
 # --- sourcing has no side effects ------------------------------------------
@@ -136,13 +143,13 @@ EOF
 
 # --- full install: success --------------------------------------------------
 
-@test "sha256 match installs ssserver 0755" {
+@test "sha256 match (embedded hash) installs ssserver 0755" {
   printf '#!/bin/sh\necho x86_64\n' > "$STUB_DIR/uname"; chmod +x "$STUB_DIR/uname"
-  make_release x86_64-unknown-linux-musl
+  embed="$(make_release x86_64-unknown-linux-musl)"
   run bash -c "
     PATH=\"$STUB_DIR:\$PATH\"
     source '$BINARY'
-    SS_EASY_CHECKSUMS_DIR='$CHK_DIR'
+    $embed
     SS_SERVER_BIN='$INSTALL_DIR/ssserver'
     SS_RELEASE_BASE_URL='file://$HOST_DIR'
     SS_DOWNLOAD_PROTO='=file'
@@ -157,12 +164,12 @@ EOF
 
 @test "install is idempotent: overwrites an existing ssserver without error" {
   printf '#!/bin/sh\necho x86_64\n' > "$STUB_DIR/uname"; chmod +x "$STUB_DIR/uname"
-  make_release x86_64-unknown-linux-musl
+  embed="$(make_release x86_64-unknown-linux-musl)"
   printf 'old\n' > "$INSTALL_DIR/ssserver"; chmod 755 "$INSTALL_DIR/ssserver"
   run bash -c "
     PATH=\"$STUB_DIR:\$PATH\"
     source '$BINARY'
-    SS_EASY_CHECKSUMS_DIR='$CHK_DIR'
+    $embed
     SS_SERVER_BIN='$INSTALL_DIR/ssserver'
     SS_RELEASE_BASE_URL='file://$HOST_DIR'
     SS_DOWNLOAD_PROTO='=file'
@@ -176,20 +183,15 @@ EOF
 
 # --- full install: failure paths -------------------------------------------
 
-@test "sha256 mismatch aborts, removes temp, ssserver not installed" {
+@test "sha256 mismatch (tampered) aborts, removes temp, ssserver not installed" {
   printf '#!/bin/sh\necho x86_64\n' > "$STUB_DIR/uname"; chmod +x "$STUB_DIR/uname"
-  make_release x86_64-unknown-linux-musl
-  # Corrupt the expected checksum so the real download cannot match.
-  : > "$CHK_DIR/ss-rust.sha256"
-  printf '%s  %s\n' \
-    "0000000000000000000000000000000000000000000000000000000000000000" \
-    "shadowsocks-v1.23.5.x86_64-unknown-linux-musl.tar.xz" \
-    > "$CHK_DIR/ss-rust.sha256"
-  before="$(ls -A "$TMPDIR_TEST")"
+  make_release x86_64-unknown-linux-musl >/dev/null
+  # Pin a WRONG embedded hash so the real download cannot match (tamper sim).
+  embed="_SS_RUST_SHA256_x86_64_unknown_linux_musl=0000000000000000000000000000000000000000000000000000000000000000"
   run bash -c "
     PATH=\"$STUB_DIR:\$PATH\"
     source '$BINARY'
-    SS_EASY_CHECKSUMS_DIR='$CHK_DIR'
+    $embed
     SS_SERVER_BIN='$INSTALL_DIR/ssserver'
     SS_RELEASE_BASE_URL='file://$HOST_DIR'
     SS_DOWNLOAD_PROTO='=file'
@@ -205,18 +207,17 @@ EOF
 
 @test "truncated archive aborts on extraction; cleanup, ssserver not installed" {
   printf '#!/bin/sh\necho x86_64\n' > "$STUB_DIR/uname"; chmod +x "$STUB_DIR/uname"
-  make_release x86_64-unknown-linux-musl
+  make_release x86_64-unknown-linux-musl >/dev/null
   asset="shadowsocks-v1.23.5.x86_64-unknown-linux-musl.tar.xz"
-  # Truncate the served archive AND fix the checksum line so download+verify
-  # pass but extraction fails on the corrupt tar.
+  # Truncate the served archive AND re-pin the embedded hash to its post-trunc
+  # value so download+verify pass but extraction fails on the corrupt tar.
   head -c 32 "$HOST_DIR/$asset" > "$HOST_DIR/$asset.trunc" && mv "$HOST_DIR/$asset.trunc" "$HOST_DIR/$asset"
-  : > "$CHK_DIR/ss-rust.sha256"
   newsum="$(sha256sum "$HOST_DIR/$asset" | awk '{print $1}')"
-  printf '%s  %s\n' "$newsum" "$asset" > "$CHK_DIR/ss-rust.sha256"
+  embed="_SS_RUST_SHA256_x86_64_unknown_linux_musl=$newsum"
   run bash -c "
     PATH=\"$STUB_DIR:\$PATH\"
     source '$BINARY'
-    SS_EASY_CHECKSUMS_DIR='$CHK_DIR'
+    $embed
     SS_SERVER_BIN='$INSTALL_DIR/ssserver'
     SS_RELEASE_BASE_URL='file://$HOST_DIR'
     SS_DOWNLOAD_PROTO='=file'
@@ -229,13 +230,58 @@ EOF
   [ "$output" = "0" ]
 }
 
-@test "download failure during install aborts without partial artifacts" {
+# --- embedded checksum table ------------------------------------------------
+
+@test "ss_expected_sha256 returns the embedded hash for a known triple" {
+  run bash -c "source '$BINARY'; ss_expected_sha256 x86_64-unknown-linux-musl"
+  [ "$status" -eq 0 ]
+  [ "$output" = "d37e9f6484aced51188ed6c8beea3538be7a73b072259b65a47e91ebf6530dfc" ]
+}
+
+@test "ss_expected_sha256 fails (no output) for an unknown triple" {
+  run bash -c "source '$BINARY'; ss_expected_sha256 riscv64-unknown-linux-musl"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "embedded checksums stay in sync with checksums/ss-rust.sha256" {
+  # The repo file is the human/CI source of truth; build.sh keeps the embedded
+  # constants in sync. For every line in the file, the embedded constant for its
+  # triple MUST equal the committed hash. Guards against a stale hand edit.
+  while read -r sum asset; do
+    [ -n "$sum" ] || continue
+    # asset: shadowsocks-<version>.<triple>.tar.xz; the version has dots, so match
+    # the trailing Rust triple (<cpu>-<vendor>-linux-<libc>) directly.
+    base="${asset%.tar.xz}"
+    [[ "$base" =~ ([A-Za-z0-9_]+-[A-Za-z0-9_]+-linux-[A-Za-z0-9_]+)$ ]] || { echo "bad asset: $asset"; false; }
+    triple="${BASH_REMATCH[1]}"
+    embedded="$(bash -c "source '$BINARY'; ss_expected_sha256 '$triple'")"
+    [ "$embedded" = "$sum" ] || { echo "out of sync for $triple: file=$sum embedded=$embedded"; false; }
+  done < "$REPO_ROOT/checksums/ss-rust.sha256"
+}
+
+@test "install refuses when no embedded hash exists for the host triple" {
+  # Detect a triple with NO embedded constant -> must die before downloading.
   printf '#!/bin/sh\necho x86_64\n' > "$STUB_DIR/uname"; chmod +x "$STUB_DIR/uname"
-  make_release x86_64-unknown-linux-musl
   run bash -c "
     PATH=\"$STUB_DIR:\$PATH\"
     source '$BINARY'
-    SS_EASY_CHECKSUMS_DIR='$CHK_DIR'
+    unset _SS_RUST_SHA256_x86_64_unknown_linux_musl
+    SS_SERVER_BIN='$INSTALL_DIR/ssserver'
+    ss_install_binary
+  "
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no embedded SHA256"* ]]
+  [ ! -e "$INSTALL_DIR/ssserver" ]
+}
+
+@test "download failure during install aborts without partial artifacts" {
+  printf '#!/bin/sh\necho x86_64\n' > "$STUB_DIR/uname"; chmod +x "$STUB_DIR/uname"
+  embed="$(make_release x86_64-unknown-linux-musl)"
+  run bash -c "
+    PATH=\"$STUB_DIR:\$PATH\"
+    source '$BINARY'
+    $embed
     SS_SERVER_BIN='$INSTALL_DIR/ssserver'
     SS_RELEASE_BASE_URL='file://$HOST_DIR/does-not-exist'
     SS_DOWNLOAD_PROTO='=file'

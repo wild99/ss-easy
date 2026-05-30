@@ -15,8 +15,57 @@ LIB_DIR="${ROOT}/lib"
 ENTRY="${ROOT}/ss-easy"
 DIST_DIR="${ROOT}/dist"
 OUT="${DIST_DIR}/ss-easy"
+CHECKSUMS_FILE="${ROOT}/checksums/ss-rust.sha256"
 
 [ -f "$ENTRY" ] || { echo "build: entrypoint not found: $ENTRY" >&2; exit 1; }
+
+# --- keep embedded ss-rust checksums in sync --------------------------------
+#
+# checksums/ss-rust.sha256 is the single source of truth (human/CI-readable).
+# The installed single-file bundle has no sibling files, so binary.sh verifies
+# the download against EMBEDDED constants instead. Regenerate that embedded block
+# from the checksums file on every build so the two can never drift. Each file
+# line is `<sha256>  shadowsocks-<ver>.<triple>.tar.xz`; we emit one constant
+# `_SS_RUST_SHA256_<triple-with-_>="<hash>"` per line, between the managed
+# sentinels in lib/binary.sh.
+_ss_sync_embedded_checksums() {
+  local binary="${LIB_DIR}/binary.sh"
+  [ -f "$CHECKSUMS_FILE" ] || { echo "build: checksum table not found: $CHECKSUMS_FILE" >&2; exit 1; }
+  [ -f "$binary" ] || { echo "build: binary module not found: $binary" >&2; exit 1; }
+
+  local block tmp
+  block="$(
+    while read -r sum asset; do
+      [ -n "$sum" ] || continue
+      # asset: shadowsocks-<version>.<triple>.tar.xz. The version itself contains
+      # dots, so a prefix glob is ambiguous; match the trailing Rust triple
+      # (<cpu>-<vendor>-linux-<libc>) directly instead.
+      local base="${asset%.tar.xz}" triple=""
+      if [[ "$base" =~ ([A-Za-z0-9_]+-[A-Za-z0-9_]+-linux-[A-Za-z0-9_]+)$ ]]; then
+        triple="${BASH_REMATCH[1]}"
+      else
+        echo "build: cannot parse triple from asset: $asset" >&2; exit 1
+      fi
+      printf '_SS_RUST_SHA256_%s="%s"\n' "${triple//[-.]/_}" "$sum"
+    done < "$CHECKSUMS_FILE"
+  )"
+
+  [ -n "$block" ] || { echo "build: no checksum lines parsed from $CHECKSUMS_FILE" >&2; exit 1; }
+
+  # Replace everything between the BEGIN/END sentinels (exclusive) with the
+  # freshly generated constants. awk keeps the sentinel lines themselves.
+  tmp="$(mktemp "${LIB_DIR}/.binary.XXXXXX")"
+  awk -v block="$block" '
+    /EMBEDDED-CHECKSUMS:BEGIN/ { print; print block; skip = 1; next }
+    /EMBEDDED-CHECKSUMS:END/   { skip = 0; print; next }
+    skip == 1                  { next }
+    { print }
+  ' "$binary" > "$tmp"
+  chmod --reference="$binary" "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$binary"
+}
+
+_ss_sync_embedded_checksums
 
 mkdir -p "$DIST_DIR"
 
