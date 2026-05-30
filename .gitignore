@@ -1,0 +1,26 @@
+# ---------------------------------------------------------------------------
+# Local working files: planning notes, scratch, logs — not part of the project
+# ---------------------------------------------------------------------------
+work/
+tmp/
+logs/
+
+# ---------------------------------------------------------------------------
+# OS / editor noise
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# ---------------------------------------------------------------------------
+# Runtime / local state — never commit generated secrets
+# ---------------------------------------------------------------------------
+*.log
+*.local
+
+# Note: dist/ss-easy (the single-file bundle) IS committed — it is the published
+# artifact the curl|bash bootstrap fetches at a tag. CI asserts it matches
+# checksums/bootstrap.sha256 (deterministic build), so it never drifts.
