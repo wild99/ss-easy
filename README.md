@@ -124,9 +124,9 @@ sudo ss-easy uninstall            # removes service, config, users, binary and t
 Use the printed `ss://` link or scan the QR code in any shadowsocks client
 (Outline, Shadowrocket, v2rayN, Clash, etc.).
 
-> **On Linux?** [VibePN](https://vibepn.app) is a clean, lightweight client that
-> just works — no memory leaks, no dependency wrangling, simple to use. Paste the
-> `ss://` link and you're connected.
+> **Client tip:** [VibePN](https://vibepn.app) works across all platforms and is
+> simple to use. Its Linux GUI is especially solid — none of the memory-leak issues
+> many other clients suffer from. Paste the `ss://` link and you're connected.
 
 **Cipher compatibility:** the default `2022-blake3-aes-256-gcm` (SIP022) requires
 a reasonably recent client. If your client is older, create the user with the
