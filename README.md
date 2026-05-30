@@ -21,7 +21,7 @@ users and the service — no Linux expertise required.
 ### Quick start (one-liner)
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.4/install.sh)"
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.5/install.sh)"
 ```
 
 This downloads the version-pinned, **SHA256-verified** bundle, installs the
@@ -41,13 +41,13 @@ Silent mode asks nothing and uses safe defaults (random high port, crypto-random
 secret, auto-detected public IP). It needs no terminal, so a plain pipe is fine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.4/install.sh | sudo bash -s -- --silent
+curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.5/install.sh | sudo bash -s -- --silent
 ```
 
 Override any default (two-step keeps flags readable):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.4/install.sh -o ss-easy-install.sh
+curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.5/install.sh -o ss-easy-install.sh
 sudo bash ss-easy-install.sh --silent --port 8443 --method chacha20-ietf-poly1305 --name alice
 ```
 
@@ -64,7 +64,7 @@ sudo ./ss-easy install
 The bundle's checksum is committed next to it and re-verified in CI:
 
 ```bash
-tag=v1.0.4
+tag=v1.0.5
 base="https://raw.githubusercontent.com/wild99/ss-easy/$tag"
 curl -fsSL "$base/dist/ss-easy" -o ss-easy
 curl -fsSL "$base/checksums/bootstrap.sha256" | sed "s#dist/##" | sha256sum -c -

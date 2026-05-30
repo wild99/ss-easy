@@ -1041,6 +1041,27 @@ _install_resolve_address() {
   net_detect_public_ip "$manual"
 }
 
+# _install_prompt_first_user_name <default> — interactive prompt for the first
+# user's name. A meaningful name (e.g. "home", "work-de", a hostname) makes it
+# easy to tell servers apart in a client; the literal "default" everywhere does
+# not. Empty input or cancel keeps <default>; invalid input re-prompts. Validated
+# with users_validate_name. Only called in interactive mode when --name was absent.
+_install_prompt_first_user_name() {
+  local def="${1:-default}" entered
+  while :; do
+    entered="$(whiptail --inputbox \
+      "Name for the first user.\n\nA label that tells this server apart in your client (e.g. 'home', 'work-de', or a hostname) — better than 'default' on every box.\n\nLetters, digits, _ or - (max 32):" \
+      14 70 "$def" 3>&1 1>&2 2>&3)" || { printf '%s' "$def"; return 0; }
+    [ -z "$entered" ] && entered="$def"
+    if users_validate_name "$entered"; then
+      printf '%s' "$entered"
+      return 0
+    fi
+    whiptail --msgbox "Invalid name '${entered}'.\nUse letters, digits, _ or - (max 32 chars)." \
+      10 60 3>&1 1>&2 2>&3 || true
+  done
+}
+
 # --- binary install / upgrade ----------------------------------------------
 
 # _install_binary_if_needed <silent> — install the pinned ss-rust binary, or skip
@@ -1132,6 +1153,7 @@ do_install() {
   local port=""
   local ip=""
   local name="default"
+  local name_set=0   # 1 once --name is given, so interactive mode won't prompt.
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -1142,8 +1164,8 @@ do_install() {
       --port=*)        port="${1#*=}"; shift ;;
       --ip)            ip="${2:?--ip requires an argument}"; shift 2 ;;
       --ip=*)          ip="${1#*=}"; shift ;;
-      --name)          name="${2:?--name requires an argument}"; shift 2 ;;
-      --name=*)        name="${1#*=}"; shift ;;
+      --name)          name="${2:?--name requires an argument}"; name_set=1; shift 2 ;;
+      --name=*)        name="${1#*=}"; name_set=1; shift ;;
       *) die "install: unknown option '$1'" ;;
     esac
   done
@@ -1194,6 +1216,11 @@ do_install() {
   #    which carries the secret; capture+discard it so it does not double-print.
   local first_user
   if _install_registry_empty; then
+    # Interactive first install with no explicit --name: ask for a meaningful
+    # name so multiple servers aren't all "default" (hard to tell apart by IP).
+    if [ "$silent" != "1" ] && [ "$name_set" = "0" ]; then
+      name="$(_install_prompt_first_user_name "$name")"
+    fi
     if [ -n "$port" ]; then
       # An explicit first-user port: add the record directly so it is honoured.
       local secret created
@@ -3000,7 +3027,7 @@ users_show() {
 # the strip markers below when assembling dist/ss-easy.
 
 # Version of the tool itself (not the pinned ss-rust release in SS_RUST_VERSION).
-SS_EASY_VERSION="1.0.4"
+SS_EASY_VERSION="1.0.5"
 
 # --- Usage / version --------------------------------------------------------
 
