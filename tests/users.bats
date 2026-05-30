@@ -233,6 +233,35 @@ mut_env() {
   [ "$output" = "bob" ]
 }
 
+@test "user add/del skip cleanly when firewall_* is undefined (no lib/firewall.sh)" {
+  # The e2e harness (and any caller) may source ONLY config/users/link, leaving
+  # firewall_open_port/firewall_close_port undefined. The `command -v` guard in
+  # _users_open_firewall/_users_close_firewall must warn-and-skip — it must NOT
+  # emit `firewall_open_port: command not found`, and the mutation must succeed.
+  # service is skipped via _users_service_installed so we isolate the firewall guard.
+  run bash -c "
+    set -euo pipefail
+    source '$COMMON'
+    SS_EASY_ETC='$SS_EASY_ETC'
+    SS_EASY_USERS='$SS_EASY_USERS'
+    SS_EASY_CONFIG='$SS_EASY_CONFIG'
+    SS_EASY_USERS_DIR='$SS_EASY_USERS_DIR'
+    source '$CONFIG'
+    source '$LINK'
+    source '$USERS'
+    _users_service_installed() { return 1; }   # no systemd unit -> skip reload
+    config_init
+    users_add 'carol' '2022-blake3-aes-256-gcm' >/dev/null
+    users_del 'carol'
+  " 2>&1
+  [ "$status" -eq 0 ]
+  # The bug we are guarding against would surface as this exact message.
+  [[ "$output" != *"command not found"* ]]
+  # And both users were really added then removed.
+  run jq -r '.users | length' "$SS_EASY_USERS"
+  [ "$output" = "0" ]
+}
+
 @test "show nonexistent fails with not-found message" {
   run in_env "config_init; users_show 'ghost'"
   [ "$status" -ne 0 ]

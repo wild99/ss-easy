@@ -49,6 +49,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# dump_logs — print BOTH process logs to stderr so any failure (ssserver/sslocal
+# never bound, a process died, or curl failed) is diagnosable from CI output. The
+# single CI flake (rocky:9 + 2022-blake3) was invisible precisely because the
+# readiness timeout did not dump sslocal.log. Tolerate either log being absent.
+dump_logs() {
+  echo "--- ssserver.log ---" >&2; cat "$WORK/ssserver.log" >&2 2>/dev/null || echo "(no ssserver.log)" >&2
+  echo "--- sslocal.log ---"  >&2; cat "$WORK/sslocal.log"  >&2 2>/dev/null || echo "(no sslocal.log)"  >&2
+}
+
 # --- source the real modules (dev mode) -------------------------------------
 # shellcheck source=/dev/null
 . "$REPO/lib/common.sh"
@@ -117,11 +126,13 @@ log "starting ssserver -c config.json (port ${SERVER_PORT})"
 "$SS_SERVER_BIN" -c "$SS_EASY_CONFIG" >"$WORK/ssserver.log" 2>&1 &
 SERVER_PID=$!
 
-# Wait for the server to be listening on its TCP port.
+# Wait for the server to be listening on its TCP port. Budget ~30s (150 × 0.2s):
+# a cold CI runner (rocky image pull + GPG import under load) can push first-bind
+# well past the old 10s window — that is exactly the timing flake we are killing.
 wait_listen() {
   local port="$1" i
-  for i in $(seq 1 50); do
-    : "$i"  # loop counter only; bound the wait to ~10s
+  for i in $(seq 1 150); do
+    : "$i"  # loop counter only; bound the wait to ~30s
     if "$SS_SERVER_BIN" --version >/dev/null 2>&1 \
        && (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
       exec 3>&- 3<&- 2>/dev/null || true
@@ -131,8 +142,8 @@ wait_listen() {
   done
   return 1
 }
-wait_listen "$SERVER_PORT" || { cat "$WORK/ssserver.log" >&2; fail "ssserver did not start listening on $SERVER_PORT"; }
-kill -0 "$SERVER_PID" 2>/dev/null || { cat "$WORK/ssserver.log" >&2; fail "ssserver process died"; }
+wait_listen "$SERVER_PORT" || { dump_logs; fail "ssserver did not start listening on $SERVER_PORT"; }
+kill -0 "$SERVER_PID" 2>/dev/null || { dump_logs; fail "ssserver process died"; }
 
 # --- 4) start sslocal as a SOCKS5 proxy from the ss:// link ------------------
 SOCKS_PORT="${E2E_SOCKS_PORT:-11080}"
@@ -144,20 +155,28 @@ log "starting sslocal (SOCKS5 on 127.0.0.1:${SOCKS_PORT}) from the ss:// link"
   >"$WORK/sslocal.log" 2>&1 &
 LOCAL_PID=$!
 
-wait_listen "$SOCKS_PORT" || { cat "$WORK/sslocal.log" >&2; fail "sslocal did not start listening on $SOCKS_PORT"; }
-kill -0 "$LOCAL_PID" 2>/dev/null || { cat "$WORK/sslocal.log" >&2; fail "sslocal process died"; }
+wait_listen "$SOCKS_PORT" || { dump_logs; fail "sslocal did not start listening on $SOCKS_PORT"; }
+kill -0 "$LOCAL_PID" 2>/dev/null || { dump_logs; fail "sslocal process died"; }
 
 # --- 5) curl a target THROUGH the proxy -------------------------------------
+# Retry up to 3× with a short sleep: the SOCKS port can be bound a beat before
+# sslocal has fully wired its upstream session, so the very first request through
+# a just-came-up proxy may transiently fail. We still PROVE a real 2xx/3xx — the
+# success criterion is unchanged, the retry only absorbs that startup race.
 log "curl ${TARGET_URL} through the SOCKS5 proxy (${METHOD})"
-code="$(curl --silent --show-error --max-time 30 \
-        --socks5-hostname "127.0.0.1:${SOCKS_PORT}" \
-        -o /dev/null -w '%{http_code}' "$TARGET_URL" || true)"
-log "HTTP status through proxy: ${code}"
+code=""
+for attempt in 1 2 3; do
+  code="$(curl --silent --show-error --max-time 30 \
+          --socks5-hostname "127.0.0.1:${SOCKS_PORT}" \
+          -o /dev/null -w '%{http_code}' "$TARGET_URL" || true)"
+  log "HTTP status through proxy (attempt ${attempt}/3): ${code}"
+  case "$code" in 2*|3*) break ;; esac
+  [ "$attempt" -lt 3 ] && sleep 1
+done
 case "$code" in
   2*|3*) log "PROXY E2E PASSED (method=${METHOD}): traffic flowed through the generated ss:// link" ;;
   *)
-    echo "--- ssserver.log ---" >&2; cat "$WORK/ssserver.log" >&2
-    echo "--- sslocal.log ---"  >&2; cat "$WORK/sslocal.log"  >&2
+    dump_logs
     fail "curl through proxy returned status '${code}' (expected 2xx/3xx)"
     ;;
 esac

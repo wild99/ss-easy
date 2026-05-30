@@ -2767,16 +2767,30 @@ _users_reload_service() {
 
 # _users_open_firewall <port> — open tcp+udp for a user port. firewall_open_port
 # is self-guarding (warns+skips when no firewall is installed/active) and never
-# touches SSH, so failures here are non-fatal to the mutation.
+# touches SSH, so failures here are non-fatal to the mutation. The function
+# itself is guarded with `command -v` (mirroring _users_service_installed): in
+# the assembled bundle lib/firewall.sh is always present, but a slim test harness
+# that sources only config/users/link must warn+skip rather than emit
+# `firewall_open_port: command not found`.
 _users_open_firewall() {
   local port="$1"
+  if ! command -v firewall_open_port >/dev/null 2>&1; then
+    log_warn "firewall support not loaded; skipping open of ${port}/tcp+udp."
+    return 0
+  fi
   firewall_open_port "$port" tcp || log_warn "could not open ${port}/tcp in the firewall."
   firewall_open_port "$port" udp || log_warn "could not open ${port}/udp in the firewall."
 }
 
 # _users_close_firewall <port> — remove the tcp+udp rules for a removed user port.
+# Same `command -v` guard as _users_open_firewall (firewall.sh always present in
+# the bundle; warn+skip when sourced standalone without it).
 _users_close_firewall() {
   local port="$1"
+  if ! command -v firewall_close_port >/dev/null 2>&1; then
+    log_warn "firewall support not loaded; skipping close of ${port}/tcp+udp."
+    return 0
+  fi
   firewall_close_port "$port" tcp || log_warn "could not close ${port}/tcp in the firewall."
   firewall_close_port "$port" udp || log_warn "could not close ${port}/udp in the firewall."
 }
