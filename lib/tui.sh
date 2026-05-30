@@ -180,9 +180,11 @@ _tui_service_menu() {
         restart  "Restart the service" \
         status   "Show service status" \
         enable   "Enable at boot" \
-        disable  "Disable at boot")"; then
+        disable  "Disable at boot" \
+        back     "← Back to main menu")"; then
       return 0   # cancel/ESC -> back to main menu.
     fi
+    [ "$choice" = "back" ] && return 0
 
     local _out
     case "$choice" in
@@ -301,7 +303,8 @@ _tui_users_menu() {
         add  "Add a new user" \
         del  "Delete a user" \
         list "List all users" \
-        show "Show a user's link + QR")"; then
+        show "Show a user's link + QR" \
+        back "← Back to main menu")"; then
       return 0   # cancel/ESC -> back to main menu.
     fi
 
@@ -310,6 +313,7 @@ _tui_users_menu() {
       del)  _tui_user_del ;;
       list) _tui_user_list ;;
       show) _tui_user_show ;;
+      back) return 0 ;;
       *) : ;;
     esac
   done
@@ -383,7 +387,8 @@ tui_main() {
         service   "Service control (start/stop/restart/status...)" \
         users     "Manage users (add/del/list/show)" \
         info      "Server info" \
-        uninstall "Uninstall ss-easy")"; then
+        uninstall "Uninstall ss-easy" \
+        exit      "Exit")"; then
       return 0   # cancel/ESC at the top level -> clean exit.
     fi
 
@@ -392,6 +397,7 @@ tui_main() {
       users)     _tui_users_menu ;;
       info)      _tui_server_info ;;
       uninstall) _tui_uninstall ;;
+      exit)      return 0 ;;
       *) : ;;
     esac
   done

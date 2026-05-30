@@ -266,3 +266,31 @@ run_tui() {
   # ...and an error msgbox was rendered carrying the failure text.
   grep -qi 'already exists' "$LOG"
 }
+
+# --- explicit Back / Exit menu items ---------------------------------------
+
+@test "main menu Exit item returns cleanly without entering a submenu" {
+  # 1: main -> "exit". No further dialogs should be requested.
+  make_whiptail_stub "0|exit"
+  run_tui ""
+  [ "$status" -eq 0 ]
+  # No submenu/operation was invoked.
+  ! grep -qE '^(users_|service_|do_uninstall)' "$LOG"
+}
+
+@test "users submenu Back item returns to the main menu" {
+  # 1: main -> "users"; 2: users -> "back" (return to main); 3: main -> "exit".
+  make_whiptail_stub "0|users" "0|back" "0|exit"
+  run_tui ""
+  [ "$status" -eq 0 ]
+  # Back is pure navigation: no user operation ran.
+  ! grep -qE '^users_(add|del|list|show)' "$LOG"
+}
+
+@test "service submenu Back item returns to the main menu" {
+  # 1: main -> "service"; 2: service -> "back"; 3: main -> "exit".
+  make_whiptail_stub "0|service" "0|back" "0|exit"
+  run_tui ""
+  [ "$status" -eq 0 ]
+  ! grep -qE '^service_(start|stop|restart|enable|disable)' "$LOG"
+}

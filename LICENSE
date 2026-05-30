@@ -1,4 +1,4 @@
-MIT License
+MIT License (with attribution requirement)
 
 Copyright (c) 2026 wild99
 
@@ -11,6 +11,14 @@ furnished to do so, subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
+
+ATTRIBUTION REQUIREMENT (in addition to the conditions above):
+Any use, distribution, fork, or derivative work of the Software — including any
+public deployment, product, or documentation built with or based on it — must
+include a clearly visible and, where the medium supports it, clickable
+attribution link to the original repository:
+
+    https://github.com/wild99/ss-easy
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
