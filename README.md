@@ -25,8 +25,10 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0
 ```
 
 This downloads the version-pinned, **SHA256-verified** bundle, installs the
-dependencies and the shadowsocks-rust binary, creates your first user, opens the
-firewall, enables BBR, starts the service, and prints the connection link + QR.
+dependencies and the shadowsocks-rust binary, then asks for a **name for the first
+user** (a label like `home` or `work-de` so you can tell servers apart in your
+client — press Enter to keep `default`), opens the firewall, enables BBR, starts
+the service, and prints the connection link + QR.
 
 > **Why not `curl … | sudo bash`?** Piping the script *into* `sudo` leaves `sudo`'s
 > stdin attached to the pipe, not your keyboard. On distros where `sudo` uses a
@@ -83,7 +85,10 @@ sudo ss-easy            # or: sudo ss-easy tui
 ```
 
 A menu lets you manage the service, add/remove users, view connection links + QR
-codes, see server info, and uninstall — without typing any commands.
+codes, see server info, and uninstall — without typing any commands. Navigate with
+the arrow keys; submenus have a `← Back` item and the main menu an `Exit` item
+(Esc/Cancel also work). The link and QR are printed on the plain terminal (not in a
+dialog box) so the link is easy to copy and the QR fits the screen.
 
 ### Manage users (CLI)
 
