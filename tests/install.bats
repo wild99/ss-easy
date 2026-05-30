@@ -265,8 +265,10 @@ run_dispatch() {
   secret="$(jq -r '.users[0].secret' "$SS_EASY_USERS")"
   port="$(jq -r '.users[0].port' "$SS_EASY_USERS")"
   host="$(jq -r '.server_address' "$SS_EASY_USERS")"
-  # SIP022: ss://<method>:<secret>@<host>:<port>#<tag>
-  [[ "$uri" == "ss://${method}:${secret}@${host}:${port}#"* ]]
+  # SIP022: ss://<method>:<percent-encoded secret>@<host>:<port>#<tag>. The key is
+  # standard base64 (+,/,=) and is percent-encoded in the URL (canonical ssurl form).
+  local enc="${secret//+/%2B}"; enc="${enc//\//%2F}"; enc="${enc//=/%3D}"
+  [[ "$uri" == "ss://${method}:${enc}@${host}:${port}#"* ]]
 }
 
 # ===========================================================================

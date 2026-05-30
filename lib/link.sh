@@ -5,9 +5,11 @@
 # PUBLIC CONTRACT (consumed by users.sh):
 #   link_build <method> <secret> <host> <port> <tag>
 #       print the ss:// connection URI. Two encodings, picked by method:
-#         - SIP022 (2022-blake3-*): ss://<method>:<base64key>@host:port#tag
-#           The userinfo is PLAINTEXT "method:key" — NOT base64-encoded. The key
-#           itself is STANDARD base64 with padding (32-byte key, per Decision 4).
+#         - SIP022 (2022-blake3-*): ss://<method>:<pct(base64key)>@host:port#tag
+#           The userinfo is "method:key" with the key PERCENT-ENCODED: the 32-byte
+#           key is STANDARD base64 (Decision 4) and may contain +,/,= which are
+#           URL-unsafe in userinfo and break parsing if emitted raw. This matches
+#           the canonical form ss-rust's own `ssurl` produces.
 #         - classic AEAD (everything else, e.g. chacha20-ietf-poly1305):
 #           ss://<base64url(method:password)>@host:port#tag  (SIP002).
 #   link_render_qr <uri>
@@ -47,6 +49,21 @@ _link_b64url() {
   printf '%s' "$1" | base64 | tr '+/' '-_' | tr -d '=\n'
 }
 
+# _link_pct <string> — percent-encode bytes outside the RFC3986 "unreserved" set
+# (A-Z a-z 0-9 - . _ ~). A standard-base64 SIP022 key contains +,/,= which are
+# unsafe in URL userinfo; encoding them yields the canonical ss-rust `ssurl` form.
+_link_pct() {
+  local s="$1" out="" i c hex
+  for (( i = 0; i < ${#s}; i++ )); do
+    c="${s:i:1}"
+    case "$c" in
+      [A-Za-z0-9._~-]) out+="$c" ;;
+      *) printf -v hex '%02X' "'$c"; out+="%${hex}" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 # --- URI builder ------------------------------------------------------------
 
 # link_build <method> <secret> <host> <port> <tag>
@@ -54,8 +71,10 @@ link_build() {
   local method="$1" secret="$2" host="$3" port="$4" tag="$5"
 
   if _link_is_sip022 "$method"; then
-    # SIP022: userinfo is the literal "method:key" (key already standard base64).
-    printf 'ss://%s:%s@%s:%s#%s\n' "$method" "$secret" "$host" "$port" "$tag"
+    # SIP022: userinfo is "method:percent-encode(key)". The key is standard base64
+    # (+,/,=), which is URL-unsafe in userinfo and breaks parsing if emitted raw;
+    # percent-encoding matches the canonical form ss-rust's `ssurl` produces.
+    printf 'ss://%s:%s@%s:%s#%s\n' "$method" "$(_link_pct "$secret")" "$host" "$port" "$tag"
   else
     # Classic SIP002: userinfo is base64url(method:password).
     local userinfo

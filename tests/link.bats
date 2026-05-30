@@ -57,15 +57,25 @@ in_env() {
 
 # --- SIP022 -----------------------------------------------------------------
 
-@test "sip022 link matches fixture (userinfo NOT base64-encoded)" {
-  # 2022-blake3: ss://method:base64key@host:port#tag — userinfo is plaintext.
+@test "sip022 link percent-encodes the key (regression: raw +,/,= break URL parsing)" {
+  # 2022-blake3: ss://method:pct(base64key)@host:port#tag. The key is standard
+  # base64 and may contain +,/,= which are URL-unsafe in userinfo; emitting them
+  # raw makes clients (incl. ss-rust sslocal) reject the link. Must percent-encode.
   key='ABCDEFGHIJKLMNOPQRSTUVWXYZ012345+/abcdef0123456789ABCDEF01234='
   link="$(in_env "link_build '2022-blake3-aes-256-gcm' '$key' 'example.com' 9000 'bob'")"
   [[ "$link" == ss://* ]]
   userinfo="${link#ss://}"
   userinfo="${userinfo%%@*}"
-  # Userinfo must be the literal "method:base64key", never base64-of-that.
-  [ "$userinfo" = "2022-blake3-aes-256-gcm:$key" ]
+  # Userinfo is "method:percent-encoded(key)" — the canonical ss-rust `ssurl` form.
+  expected="${key//+/%2B}"; expected="${expected//\//%2F}"; expected="${expected//=/%3D}"
+  [ "$userinfo" = "2022-blake3-aes-256-gcm:$expected" ]
+  # Regression guard: no RAW +,/ may survive in the userinfo (they break parsing).
+  [[ "$userinfo" != *"+"* ]]
+  [[ "$userinfo" != *"/"* ]]
+  # Round-trip: percent-decoding the key part recovers the original base64 key.
+  keypart="${userinfo#2022-blake3-aes-256-gcm:}"
+  decoded="$(printf '%b' "${keypart//%/\\x}")"
+  [ "$decoded" = "$key" ]
   [[ "$link" == *"@example.com:9000#bob" ]]
 }
 

@@ -29,7 +29,10 @@ METHOD="${E2E_METHOD:-2022-blake3-aes-256-gcm}"
 TARGET_URL="${E2E_TARGET:-http://example.com}"
 
 log() { printf '[e2e] %s\n' "$*"; }
-fail() { printf '[e2e] FAIL: %s\n' "$*" >&2; exit 1; }
+# Write failures to STDOUT (not stderr) and flush before exit: when this runs as
+# the body of `docker run ...`, late stderr can be dropped on container teardown,
+# which is exactly why an earlier CI failure showed no diagnostics.
+fail() { printf '[e2e] FAIL: %s\n' "$*"; sleep 1; exit 1; }
 
 # Isolate all state under a temp root so the host /etc is never touched and the
 # script is re-runnable. The lib modules read SS_EASY_* at call time.
@@ -54,8 +57,8 @@ trap cleanup EXIT
 # single CI flake (rocky:9 + 2022-blake3) was invisible precisely because the
 # readiness timeout did not dump sslocal.log. Tolerate either log being absent.
 dump_logs() {
-  echo "--- ssserver.log ---" >&2; cat "$WORK/ssserver.log" >&2 2>/dev/null || echo "(no ssserver.log)" >&2
-  echo "--- sslocal.log ---"  >&2; cat "$WORK/sslocal.log"  >&2 2>/dev/null || echo "(no sslocal.log)"  >&2
+  echo "--- ssserver.log ---"; cat "$WORK/ssserver.log" 2>/dev/null || echo "(no ssserver.log)"
+  echo "--- sslocal.log ---";  cat "$WORK/sslocal.log"  2>/dev/null || echo "(no sslocal.log)"
 }
 
 # --- source the real modules (dev mode) -------------------------------------
@@ -121,20 +124,13 @@ log "config.json:"; jq . "$SS_EASY_CONFIG" || fail "config.json invalid JSON"
 SERVER_PORT="$(jq -r '.servers[0].server_port' "$SS_EASY_CONFIG")"
 [ -n "$SERVER_PORT" ] || fail "could not read server port from config.json"
 
-# --- 3) start ssserver from the generated config ----------------------------
-log "starting ssserver -c config.json (port ${SERVER_PORT})"
-"$SS_SERVER_BIN" -c "$SS_EASY_CONFIG" >"$WORK/ssserver.log" 2>&1 &
-SERVER_PID=$!
-
-# Wait for the server to be listening on its TCP port. Budget ~30s (150 × 0.2s):
-# a cold CI runner (rocky image pull + GPG import under load) can push first-bind
-# well past the old 10s window — that is exactly the timing flake we are killing.
+# --- helpers: readiness probe + resilient process start ---------------------
+# Pure TCP readiness probe on loopback (bash /dev/tcp). ~15s budget (75 × 0.2s).
 wait_listen() {
   local port="$1" i
-  for i in $(seq 1 150); do
-    : "$i"  # loop counter only; bound the wait to ~30s
-    if "$SS_SERVER_BIN" --version >/dev/null 2>&1 \
-       && (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+  for i in $(seq 1 75); do
+    : "$i"  # loop counter only; bound the wait to ~15s
+    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
       exec 3>&- 3<&- 2>/dev/null || true
       return 0
     fi
@@ -142,21 +138,46 @@ wait_listen() {
   done
   return 1
 }
-wait_listen "$SERVER_PORT" || { dump_logs; fail "ssserver did not start listening on $SERVER_PORT"; }
-kill -0 "$SERVER_PID" 2>/dev/null || { dump_logs; fail "ssserver process died"; }
 
-# --- 4) start sslocal as a SOCKS5 proxy from the ss:// link ------------------
-SOCKS_PORT="${E2E_SOCKS_PORT:-11080}"
-log "starting sslocal (SOCKS5 on 127.0.0.1:${SOCKS_PORT}) from the ss:// link"
+# start_and_wait <name> <port> <logfile> <pid-var> <cmd...>
+# Start <cmd> backgrounded and wait for it to bind <port>. On a constrained CI
+# runner (2 CPU) ssserver/sslocal can occasionally fail to come up in time or die
+# at startup; rather than fail the whole job on that transient, restart it (up to
+# 3 attempts), printing the failed attempt's log to STDOUT so a PERSISTENT failure
+# is still diagnosable from the CI output (stdout survives container teardown).
+start_and_wait() {
+  local name="$1" port="$2" logf="$3" pidvar="$4"; shift 4
+  local attempt pid
+  for attempt in 1 2 3; do
+    "$@" >"$logf" 2>&1 &
+    pid=$!
+    if wait_listen "$port" && kill -0 "$pid" 2>/dev/null; then
+      printf -v "$pidvar" '%s' "$pid"
+      return 0
+    fi
+    log "${name} did not come up on attempt ${attempt}/3 (port ${port}); log follows:"
+    cat "$logf" 2>/dev/null || echo "(no ${name} log)"
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    sleep 1
+  done
+  return 1
+}
+
+# --- 3) start ssserver from the generated config (resilient) ----------------
+log "starting ssserver -c config.json (port ${SERVER_PORT})"
+start_and_wait "ssserver" "$SERVER_PORT" "$WORK/ssserver.log" SERVER_PID \
+  "$SS_SERVER_BIN" -c "$SS_EASY_CONFIG" \
+  || { dump_logs; fail "ssserver did not start listening on $SERVER_PORT after 3 attempts"; }
+
+# --- 4) start sslocal as a SOCKS5 proxy from the ss:// link (resilient) ------
 # sslocal accepts the ss:// URL directly via --server-url; this is the cleanest
 # proof the LINK itself is correct (no hand-built client config).
-"$SSLOCAL" --server-url "$LINK" \
-  --local-addr "127.0.0.1:${SOCKS_PORT}" --protocol socks \
-  >"$WORK/sslocal.log" 2>&1 &
-LOCAL_PID=$!
-
-wait_listen "$SOCKS_PORT" || { dump_logs; fail "sslocal did not start listening on $SOCKS_PORT"; }
-kill -0 "$LOCAL_PID" 2>/dev/null || { dump_logs; fail "sslocal process died"; }
+SOCKS_PORT="${E2E_SOCKS_PORT:-11080}"
+log "starting sslocal (SOCKS5 on 127.0.0.1:${SOCKS_PORT}) from the ss:// link"
+start_and_wait "sslocal" "$SOCKS_PORT" "$WORK/sslocal.log" LOCAL_PID \
+  "$SSLOCAL" --server-url "$LINK" --local-addr "127.0.0.1:${SOCKS_PORT}" --protocol socks \
+  || { dump_logs; fail "sslocal did not start listening on $SOCKS_PORT after 3 attempts"; }
 
 # --- 5) curl a target THROUGH the proxy -------------------------------------
 # Retry up to 3× with a short sleep: the SOCKS port can be bound a beat before
