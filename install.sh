@@ -30,7 +30,7 @@
 #   before executing a single byte (verify-before-exec).
 #
 # Usage (the README one-liner):
-#   curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.1/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.2/install.sh | sudo bash
 # Flags after `bash` (or `bash -s --`) are forwarded verbatim to `ss-easy install`:
 #   curl -fsSL .../install.sh | sudo bash -s -- --silent
 
@@ -43,7 +43,7 @@ set -euo pipefail
 # are immutable. Override via the environment only for CI/self-test against a
 # local fixture host (never to relax integrity).
 : "${SS_EASY_REPO:=wild99/ss-easy}"
-: "${SS_EASY_TAG:=v1.0.1}"
+: "${SS_EASY_TAG:=v1.0.2}"
 
 # Base URL for the tag-pinned raw repo content (the bundle + its checksum live in
 # the tagged tree). Overridable for tests; defaults to GitHub raw over HTTPS.
@@ -179,6 +179,15 @@ Refusing to execute it (possible tampered asset, wrong tag, or corrupted downloa
   WORKDIR=""
 
   _boot_log "starting installer: ss-easy install $*"
+  # Fetched via `curl | bash`, this bootstrap's stdin is the curl pipe, not the
+  # terminal. The interactive installer then mis-handles keyboard input — arrow
+  # keys leak as raw ^[[ escape codes in the whiptail dialogs instead of moving
+  # the selection. Re-attach the controlling terminal as the installer's stdin
+  # when one is actually available; silent / non-interactive runs (cloud-init,
+  # CI, no controlling tty) fall through unchanged.
+  if { : </dev/tty; } 2>/dev/null; then
+    exec "$SS_EASY_BIN" install "$@" </dev/tty
+  fi
   exec "$SS_EASY_BIN" install "$@"
 }
 
