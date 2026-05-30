@@ -154,8 +154,9 @@ run_tui() {
 
 @test "add user passes the entered name to users_add and shows link + QR" {
   # 1: main -> "users"; 2: users -> "add"; 3: inputbox -> name "alice";
-  # 4: msgbox (link/QR) acknowledged; 5: users -> cancel; 6: main -> cancel.
-  make_whiptail_stub "0|users" "0|add" "0|alice" "0|" "1|" "1|"
+  # (link/QR now shown on the plain terminal, not a whiptail box — no ack dialog);
+  # 4: users -> cancel; 5: main -> cancel.
+  make_whiptail_stub "0|users" "0|add" "0|alice" "1|" "1|"
   run_tui ""
   [ "$status" -eq 0 ]
   # Name forwarded verbatim.
@@ -205,9 +206,10 @@ run_tui() {
 }
 
 @test "show user picks from the list and displays link + QR" {
-  # 1: main -> users; 2: users -> show; 3: pick "alice"; 4: msgbox ack;
-  # 5: users cancel; 6: main cancel.
-  make_whiptail_stub "0|users" "0|show" "0|alice" "0|" "1|" "1|"
+  # 1: main -> users; 2: users -> show; 3: pick "alice";
+  # (link/QR now shown on the plain terminal, not a whiptail box — no ack dialog);
+  # 4: users cancel; 5: main cancel.
+  make_whiptail_stub "0|users" "0|show" "0|alice" "1|" "1|"
   run_tui 'TEST_USERS=$(printf "alice\nbob")'
   [ "$status" -eq 0 ]
   grep -q '^users_show alice$' "$LOG"

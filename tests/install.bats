@@ -246,8 +246,8 @@ run_dispatch() {
 @test "post_install_block_printed: ss:// link, access-file path, status" {
   run run_install_env "do_install --silent"
   [ "$status" -eq 0 ]
-  # A valid SIP022 ss:// link is printed for the first user.
-  [[ "$output" == *"ss://2022-blake3-aes-256-gcm:"* ]]
+  # A valid SIP002 ss:// link (base64url userinfo) is printed for the first user.
+  [[ "$output" =~ ss://[A-Za-z0-9_-]+@ ]]
   # The per-user access file path is surfaced.
   [[ "$output" == *"$SS_EASY_USERS_DIR/"*".txt"* ]]
   # Service status was queried as part of the report.
@@ -258,17 +258,19 @@ run_dispatch() {
   run run_install_env "do_install --silent"
   [ "$status" -eq 0 ]
   local uri method secret port host
-  uri="$(printf '%s\n' "$output" | grep -o 'ss://2022-blake3-aes-256-gcm:[^[:space:]]*' | head -n1)"
+  uri="$(printf '%s\n' "$output" | grep -oE 'ss://[A-Za-z0-9_-]+@[^[:space:]]+' | head -n1)"
   [ -n "$uri" ]
   # Decode the ss:// userinfo/host/port and compare to the registry.
   method="$(jq -r '.users[0].method' "$SS_EASY_USERS")"
   secret="$(jq -r '.users[0].secret' "$SS_EASY_USERS")"
   port="$(jq -r '.users[0].port' "$SS_EASY_USERS")"
   host="$(jq -r '.server_address' "$SS_EASY_USERS")"
-  # SIP022: ss://<method>:<percent-encoded secret>@<host>:<port>#<tag>. The key is
-  # standard base64 (+,/,=) and is percent-encoded in the URL (canonical ssurl form).
-  local enc="${secret//+/%2B}"; enc="${enc//\//%2F}"; enc="${enc//=/%3D}"
-  [[ "$uri" == "ss://${method}:${enc}@${host}:${port}#"* ]]
+  # SIP002: userinfo = base64url(method:secret). Decode it and compare exactly.
+  local userinfo="${uri#ss://}"; userinfo="${userinfo%%@*}"
+  local b; b="$(printf '%s' "$userinfo" | tr '_-' '/+')"
+  case $(( ${#b} % 4 )) in 2) b="$b==";; 3) b="$b=";; esac
+  [ "$(printf '%s' "$b" | base64 -d)" = "${method}:${secret}" ]
+  [[ "$uri" == *"@${host}:${port}#"* ]]
 }
 
 # ===========================================================================

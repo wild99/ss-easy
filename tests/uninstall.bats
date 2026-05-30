@@ -29,6 +29,7 @@ setup() {
   SS_EASY_ETC="$TMPDIR_TEST/etc/ss-easy"
   SS_EASY_USERS="$SS_EASY_ETC/users.json"
   SS_SERVER_BIN="$TMPDIR_TEST/usr/local/bin/ssserver"
+  SS_CLI_BIN="$TMPDIR_TEST/usr/local/bin/ss-easy"
   SS_UNIT_FILE="$TMPDIR_TEST/etc/systemd/system/ss-easy.service"
   SS_AUDIT_LOG="$TMPDIR_TEST/var/log/ss-easy.log"
 
@@ -72,6 +73,7 @@ JSON
 seed_artifacts() {
   : > "$SS_UNIT_FILE"
   : > "$SS_SERVER_BIN"
+  : > "$SS_CLI_BIN"
 }
 
 # The standard mock environment: active firewall (ufw), working systemctl, a
@@ -97,7 +99,8 @@ un() {
     SS_EASY_ETC='$SS_EASY_ETC'
     SS_EASY_USERS='$SS_EASY_USERS'
     SS_SERVER_BIN='$SS_SERVER_BIN'
-    export SS_EASY_ETC SS_EASY_USERS SS_SERVER_BIN
+    SS_CLI_BIN='$SS_CLI_BIN'
+    export SS_EASY_ETC SS_EASY_USERS SS_SERVER_BIN SS_CLI_BIN
     $1
   "
 }
@@ -127,6 +130,8 @@ un() {
   grep -q 'stop ss-easy.service' "$CALLS"
   [ ! -e "$SS_EASY_ETC" ]
   [ ! -e "$SS_SERVER_BIN" ]
+  # The ss-easy CLI itself is removed too (regression: it used to be left behind).
+  [ ! -e "$SS_CLI_BIN" ]
 }
 
 @test "silent mode accepts --yes as an alias" {

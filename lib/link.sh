@@ -4,14 +4,14 @@
 #
 # PUBLIC CONTRACT (consumed by users.sh):
 #   link_build <method> <secret> <host> <port> <tag>
-#       print the ss:// connection URI. Two encodings, picked by method:
-#         - SIP022 (2022-blake3-*): ss://<method>:<pct(base64key)>@host:port#tag
-#           The userinfo is "method:key" with the key PERCENT-ENCODED: the 32-byte
-#           key is STANDARD base64 (Decision 4) and may contain +,/,= which are
-#           URL-unsafe in userinfo and break parsing if emitted raw. This matches
-#           the canonical form ss-rust's own `ssurl` produces.
-#         - classic AEAD (everything else, e.g. chacha20-ietf-poly1305):
-#           ss://<base64url(method:password)>@host:port#tag  (SIP002).
+#       print the ss:// connection URI in the SIP002 form for EVERY method:
+#           ss://<base64url(method:secret)>@host:port#tag
+#       The whole "method:secret" userinfo is URL-safe-base64 (no padding). For a
+#       2022 cipher the secret is the base64 key, so the decoded userinfo is
+#       "2022-blake3-aes-256-gcm:<base64key>". This is the form real clients expect
+#       (Outline, v2rayN, NekoBox, …): they base64-decode the userinfo, so the
+#       earlier plaintext/percent-encoded SIP022 form made them fail with
+#       "Invalid symbol '-'". ss-rust accepts this SIP002 form for 2022 too.
 #   link_render_qr <uri>
 #       render the URI as a terminal QR via `qrencode -t ANSIUTF8`. If qrencode
 #       is absent it warns and returns 0 (never aborts the caller).
@@ -20,9 +20,6 @@
 #       containing the link and human-readable connection details. The name is
 #       expected pre-validated by users.sh; the path is built with basename
 #       semantics so it can never escape SS_EASY_USERS_DIR.
-#
-# Decision 4: SIP022 links are structurally distinct and silently break if
-# emitted as a plain-password classic link, so the format branch is explicit.
 # Decision 10: secrets are written only to the 0600 access file, never to a log.
 
 # Guard against double-sourcing in the assembled bundle / nested sources.
@@ -34,34 +31,10 @@ _SS_EASY_LINK_LOADED=1
 
 # --- internal helpers -------------------------------------------------------
 
-# _link_is_sip022 <method> — exit 0 if the method uses the SIP022 (2022-blake3)
-# key-based scheme, non-zero for classic password-based AEAD ciphers.
-_link_is_sip022() {
-  case "$1" in
-    2022-blake3-*) return 0 ;;
-    *)             return 1 ;;
-  esac
-}
-
-# _link_b64url <string> — encode stdin-less argument as URL-safe base64 WITHOUT
-# padding, the SIP002 userinfo encoding for classic links.
+# _link_b64url <string> — encode the argument as URL-safe base64 WITHOUT padding,
+# the SIP002 userinfo encoding used for every method (classic and 2022).
 _link_b64url() {
   printf '%s' "$1" | base64 | tr '+/' '-_' | tr -d '=\n'
-}
-
-# _link_pct <string> — percent-encode bytes outside the RFC3986 "unreserved" set
-# (A-Z a-z 0-9 - . _ ~). A standard-base64 SIP022 key contains +,/,= which are
-# unsafe in URL userinfo; encoding them yields the canonical ss-rust `ssurl` form.
-_link_pct() {
-  local s="$1" out="" i c hex
-  for (( i = 0; i < ${#s}; i++ )); do
-    c="${s:i:1}"
-    case "$c" in
-      [A-Za-z0-9._~-]) out+="$c" ;;
-      *) printf -v hex '%02X' "'$c"; out+="%${hex}" ;;
-    esac
-  done
-  printf '%s' "$out"
 }
 
 # --- URI builder ------------------------------------------------------------
@@ -70,17 +43,15 @@ _link_pct() {
 link_build() {
   local method="$1" secret="$2" host="$3" port="$4" tag="$5"
 
-  if _link_is_sip022 "$method"; then
-    # SIP022: userinfo is "method:percent-encode(key)". The key is standard base64
-    # (+,/,=), which is URL-unsafe in userinfo and breaks parsing if emitted raw;
-    # percent-encoding matches the canonical form ss-rust's `ssurl` produces.
-    printf 'ss://%s:%s@%s:%s#%s\n' "$method" "$(_link_pct "$secret")" "$host" "$port" "$tag"
-  else
-    # Classic SIP002: userinfo is base64url(method:password).
-    local userinfo
-    userinfo="$(_link_b64url "${method}:${secret}")"
-    printf 'ss://%s@%s:%s#%s\n' "$userinfo" "$host" "$port" "$tag"
-  fi
+  # SIP002 for ALL methods: userinfo is base64url(method:secret). This is the
+  # broadly-compatible form clients expect (Outline, v2rayN, NekoBox, …). For
+  # 2022 ciphers the secret is the base64 key, so the decoded userinfo is
+  # "2022-blake3-aes-256-gcm:<base64key>". The earlier plaintext/percent-encoded
+  # SIP022 form parsed in ss-rust but real clients base64-decode the userinfo and
+  # choke on the literal method (e.g. "Invalid symbol '-'").
+  local userinfo
+  userinfo="$(_link_b64url "${method}:${secret}")"
+  printf 'ss://%s@%s:%s#%s\n' "$userinfo" "$host" "$port" "$tag"
 }
 
 # --- QR rendering -----------------------------------------------------------
@@ -93,7 +64,9 @@ link_render_qr() {
     log_warn "qrencode not found; skipping QR rendering"
     return 0
   fi
-  qrencode -t ANSIUTF8 "$uri"
+  # -m 1: trim the quiet-zone margin from the default 4 to 1 so the QR fits more
+  # terminals (still scannable). ANSIUTF8 uses half-height blocks (compact).
+  qrencode -t ANSIUTF8 -m 1 -- "$uri"
 }
 
 # --- access file ------------------------------------------------------------

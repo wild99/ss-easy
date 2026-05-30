@@ -69,6 +69,10 @@ fi
 # tree; defaults to the host log. Only non-secret action records are appended.
 : "${SS_AUDIT_LOG:=/var/log/ss-easy.log}"
 
+# Path of the ss-easy CLI the bootstrap installed. Overridable so tests point it
+# at a temp tree; defaults to the bootstrap's install location.
+: "${SS_CLI_BIN:=/usr/local/bin/ss-easy}"
+
 # --- audit ------------------------------------------------------------------
 
 # _uninstall_audit <action> — append "<iso-timestamp> <action>" to the audit log
@@ -96,7 +100,7 @@ _uninstall_confirm() {
   log_warn "This will completely remove ss-easy from this host:"
   log_warn "  - stop, disable and delete the systemd unit (${SS_SERVICE_NAME})"
   log_warn "  - delete ${SS_EASY_ETC} (registry, config, per-user access files)"
-  log_warn "  - delete the binary ${SS_SERVER_BIN}"
+  log_warn "  - delete the proxy binary ${SS_SERVER_BIN} and the ss-easy command"
   log_warn "  - close the user ports this tool opened (SSH is left untouched)"
   log_warn "  - remove the dedicated service user '${SS_SERVICE_USER}' (if tool-created)"
   printf 'Proceed with full uninstall? [y/N] ' >&2
@@ -153,8 +157,8 @@ _uninstall_service() {
   service_remove_unit || true
 }
 
-# _uninstall_files — delete the config tree and the server binary. Both are
-# guarded on existence so a partial state is fine.
+# _uninstall_files — delete the config tree, the proxy binary, and the ss-easy
+# CLI itself. All guarded on existence so a partial state is fine.
 _uninstall_files() {
   if [ -e "$SS_EASY_ETC" ]; then
     if rm -rf -- "$SS_EASY_ETC"; then
@@ -168,6 +172,17 @@ _uninstall_files() {
       log_info "removed ${SS_SERVER_BIN}"
     else
       log_warn "could not remove ${SS_SERVER_BIN}."
+    fi
+  fi
+  # Remove the ss-easy command the bootstrap installed (SS_CLI_BIN, default
+  # /usr/local/bin/ss-easy — matches the bootstrap's install path; overridable for
+  # tests). Unlinking the running binary is safe: the kernel keeps the open inode
+  # until this process exits, so the uninstall finishes normally.
+  if [ -e "$SS_CLI_BIN" ]; then
+    if rm -f -- "$SS_CLI_BIN"; then
+      log_info "removed ${SS_CLI_BIN}"
+    else
+      log_warn "could not remove ${SS_CLI_BIN}."
     fi
   fi
 }

@@ -272,7 +272,8 @@ mut_env() {
   in_env "config_init; users_add 'alice' '2022-blake3-aes-256-gcm'"
   run in_env "users_show 'alice'"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ss://2022-blake3-aes-256-gcm:"* ]]
+  # SIP002 link: base64url(method:key) userinfo, then @host.
+  [[ "$output" =~ ss://[A-Za-z0-9_-]+@ ]]
 }
 
 # --- port allocation --------------------------------------------------------

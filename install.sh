@@ -33,7 +33,7 @@
 # (NOT `curl | sudo bash`): piping into sudo leaves sudo's stdin on the pipe, and
 # with sudo's use_pty (Ubuntu 24.04 default) the interactive dialogs can't read
 # arrow keys. As an argument the controlling terminal stays attached.
-#   sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.3/install.sh)"
+#   sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.4/install.sh)"
 # Non-interactive installs need no terminal, so a plain pipe is fine:
 #   curl -fsSL .../install.sh | sudo bash -s -- --silent
 
@@ -46,7 +46,7 @@ set -euo pipefail
 # are immutable. Override via the environment only for CI/self-test against a
 # local fixture host (never to relax integrity).
 : "${SS_EASY_REPO:=wild99/ss-easy}"
-: "${SS_EASY_TAG:=v1.0.3}"
+: "${SS_EASY_TAG:=v1.0.4}"
 
 # Base URL for the tag-pinned raw repo content (the bundle + its checksum live in
 # the tagged tree). Overridable for tests; defaults to GitHub raw over HTTPS.

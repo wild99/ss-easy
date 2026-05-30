@@ -57,36 +57,37 @@ in_env() {
 
 # --- SIP022 -----------------------------------------------------------------
 
-@test "sip022 link percent-encodes the key (regression: raw +,/,= break URL parsing)" {
-  # 2022-blake3: ss://method:pct(base64key)@host:port#tag. The key is standard
-  # base64 and may contain +,/,= which are URL-unsafe in userinfo; emitting them
-  # raw makes clients (incl. ss-rust sslocal) reject the link. Must percent-encode.
+@test "sip022 link is SIP002 base64url(method:key) (regression: real clients base64-decode userinfo)" {
+  # 2022-blake3: ss://base64url(method:key)@host:port#tag. The key is standard
+  # base64 (+,/,=); the WHOLE "method:key" is wrapped in URL-safe base64 so the
+  # userinfo carries no raw +,/,=,: — earlier plaintext/percent forms made real
+  # clients (which base64-decode the userinfo) fail with "Invalid symbol '-'".
   key='ABCDEFGHIJKLMNOPQRSTUVWXYZ012345+/abcdef0123456789ABCDEF01234='
   link="$(in_env "link_build '2022-blake3-aes-256-gcm' '$key' 'example.com' 9000 'bob'")"
   [[ "$link" == ss://* ]]
   userinfo="${link#ss://}"
   userinfo="${userinfo%%@*}"
-  # Userinfo is "method:percent-encoded(key)" — the canonical ss-rust `ssurl` form.
-  expected="${key//+/%2B}"; expected="${expected//\//%2F}"; expected="${expected//=/%3D}"
-  [ "$userinfo" = "2022-blake3-aes-256-gcm:$expected" ]
-  # Regression guard: no RAW +,/ may survive in the userinfo (they break parsing).
+  # Pure URL-safe base64, no padding: no ':' '+' '/' '=' may appear in the userinfo.
+  [[ "$userinfo" != *":"* ]]
   [[ "$userinfo" != *"+"* ]]
   [[ "$userinfo" != *"/"* ]]
-  # Round-trip: percent-decoding the key part recovers the original base64 key.
-  keypart="${userinfo#2022-blake3-aes-256-gcm:}"
-  decoded="$(printf '%b' "${keypart//%/\\x}")"
-  [ "$decoded" = "$key" ]
+  [[ "$userinfo" != *"="* ]]
+  # Round-trip: base64url-decoding recovers exactly "method:key".
+  b="$(printf '%s' "$userinfo" | tr '_-' '/+')"
+  case $(( ${#b} % 4 )) in 2) b="$b==";; 3) b="$b=";; esac
+  decoded="$(printf '%s' "$b" | base64 -d)"
+  [ "$decoded" = "2022-blake3-aes-256-gcm:$key" ]
   [[ "$link" == *"@example.com:9000#bob" ]]
 }
 
-@test "sip022 and classic produce structurally distinct userinfo" {
+@test "both classic and sip022 use the SIP002 base64url envelope (no literal colon in userinfo)" {
   classic="$(in_env "link_build 'chacha20-ietf-poly1305' 'pw' 'h' 1 't'")"
   sip022="$(in_env "link_build '2022-blake3-aes-256-gcm' 'a2V5' 'h' 1 't'")"
   ci="${classic#ss://}"; ci="${ci%%@*}"
   si="${sip022#ss://}"; si="${si%%@*}"
-  # Classic userinfo is base64url (no colon visible); SIP022 keeps the colon.
-  [[ "$si" == *":"* ]]
+  # Both wrap "method:secret" in base64url, so neither userinfo shows a literal ':'.
   [[ "$ci" != *":"* ]]
+  [[ "$si" != *":"* ]]
 }
 
 # --- access file ------------------------------------------------------------

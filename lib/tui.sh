@@ -92,12 +92,27 @@ _tui_yesno() {
   whiptail --title "$title" --yesno "$text" "$_TUI_H" "$_TUI_W" 3>&1 1>&2 2>&3
 }
 
-# _tui_scroll <title> <text> — long output (link + QR) in a scrollable box. The
-# --scrolltext flag lets the operator scroll past the QR block.
-_tui_scroll() {
-  local title="$1" text="$2"
-  whiptail --title "$title" --scrolltext --msgbox "$text" \
-    "$_TUI_H" "$_TUI_W" 3>&1 1>&2 2>&3
+# _tui_present_access <name> <uri> [details] — show a user's connection details
+# OUTSIDE the whiptail UI, on the plain terminal. A whiptail box is the wrong place
+# for this: its borders clip a full-size QR (you can't reach OK, only ESC) and they
+# contaminate a copied link with border glyphs when it wraps. Here the ss:// link
+# prints on its own line (clean to select/copy) and the QR renders at full terminal
+# width (so it fits and scans). Interactive runs pause for Enter before redrawing
+# the menu; non-interactive (tests) skip the pause.
+_tui_present_access() {
+  local name="$1" uri="$2" details="${3:-}" qr
+  printf '\n'
+  [ -n "$details" ] && printf '%s\n\n' "$details"
+  printf -- '---- connection link for %s (select the line below to copy) ----\n' "$name"
+  printf '%s\n' "$uri"
+  printf -- '-----------------------------------------------------------------\n'
+  printf '\nAccess file: %s/%s.txt\n' "$SS_EASY_USERS_DIR" "$name"
+  qr="$(link_render_qr "$uri" 2>/dev/null || true)"
+  [ -n "$qr" ] && printf '\nScan this QR in your client:\n\n%s\n' "$qr"
+  if [ -t 0 ]; then
+    printf '\nPress Enter to return to the menu... '
+    read -r _ || true
+  fi
 }
 
 # --- error capture helper ---------------------------------------------------
@@ -212,7 +227,7 @@ _tui_pick_user() {
 # _tui_user_add — prompt for a name and add the user, then show the generated
 # ss:// link plus its QR. Empty/cancelled input never reaches users_add.
 _tui_user_add() {
-  local name uri qr
+  local name uri
   if ! name="$(_tui_input "$_TUI_TITLE — Add user" \
       "Enter a user name (letters, digits, _ or -, up to 32 chars):")"; then
     return 0   # cancelled -> back to users menu.
@@ -228,15 +243,7 @@ _tui_user_add() {
     return 0
   fi
 
-  qr="$(link_render_qr "$uri" 2>/dev/null || true)"
-  _tui_scroll "User added: $name" \
-    "User '${name}' was added.
-
-Connection link:
-${uri}
-
-QR code:
-${qr}" || true
+  _tui_present_access "$name" "$uri" "User '${name}' was added."
 }
 
 # _tui_user_del — pick an existing user, confirm, then delete.
@@ -269,7 +276,7 @@ _tui_user_list() {
 
 # _tui_user_show — pick a user, then show their link, QR and access-file path.
 _tui_user_show() {
-  local name details uri qr
+  local name details uri
   if ! name="$(_tui_pick_user "$_TUI_TITLE — Show user" "Select a user to show:")"; then
     _tui_msg "Show user" "There are no users yet." || true
     return 0
@@ -282,16 +289,8 @@ _tui_user_show() {
 
   # users_show prints "link   : ss://..."; pull the URI for the QR render.
   uri="$(printf '%s\n' "$details" | sed -n 's/^link[[:space:]]*:[[:space:]]*//p' | head -n1)"
-  qr=""
-  [ -n "$uri" ] && qr="$(link_render_qr "$uri" 2>/dev/null || true)"
 
-  _tui_scroll "User: $name" \
-    "${details}
-
-Access file: ${SS_EASY_USERS_DIR}/${name}.txt
-
-QR code:
-${qr}" || true
+  _tui_present_access "$name" "$uri" "$details"
 }
 
 # _tui_users_menu — loop the users submenu.
