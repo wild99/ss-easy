@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+#
+# ss-easy — turnkey shadowsocks-rust installer & manager (entrypoint).
+#
+# Thin dispatcher: parse the subcommand and route it to a handler. The real
+# business logic lives in lib/*.sh (filled in by later tasks); here the handlers
+# are stubs so the skeleton builds, lints and is testable.
+#
+# Two run modes are supported:
+#   - dev:    this file sources lib/common.sh from a sibling lib/ directory.
+#   - bundle: build.sh concatenates lib/*.sh ahead of this body, so common.sh is
+#             already present; the dev source line is neutralised at build time.
+
+set -euo pipefail
+
+# --- Module loading (dev mode) ---------------------------------------------
+# In the assembled bundle the modules are inlined above and _SS_EASY_COMMON_LOADED
+# is already set, so this block is a no-op. build.sh strips it anyway.
+if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
+  _SS_EASY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=lib/common.sh
+  . "${_SS_EASY_DIR}/lib/common.sh"
+fi
+
+# --- Usage ------------------------------------------------------------------
+
+usage() {
+  cat <<'EOF'
+Usage: ss-easy <command> [options]
+
+Commands:
+  install              Install and configure shadowsocks-rust
+  uninstall            Remove the service, config, binary and users
+  user <add|del|list|show> [name]
+                       Manage users
+  start                Start the ss-easy service
+  stop                 Stop the ss-easy service
+  restart              Restart the ss-easy service
+  status               Show service status
+  enable               Enable the service at boot
+  disable              Disable the service at boot
+  tui                  Launch the interactive whiptail menu
+
+Options:
+  -h, --help           Show this help and exit
+EOF
+}
+
+# --- Subcommand stubs -------------------------------------------------------
+# Each handler is a placeholder wired up by a later task. They accept and ignore
+# their arguments so the dispatcher contract is testable today.
+
+cmd_install()   { log_info "install: not implemented yet"; }
+cmd_uninstall() { log_info "uninstall: not implemented yet"; }
+cmd_user()      { log_info "user: not implemented yet"; }
+cmd_tui()       { log_info "tui: not implemented yet"; }
+
+cmd_service() {
+  # Shared stub for lifecycle verbs; the verb is the first argument.
+  log_info "$1: not implemented yet"
+}
+
+# --- Dispatcher -------------------------------------------------------------
+
+main() {
+  if [ "$#" -eq 0 ]; then
+    usage >&2
+    die "no command given"
+  fi
+
+  local cmd="$1"
+  shift
+
+  case "$cmd" in
+    -h|--help|help)
+      usage
+      ;;
+    install)
+      cmd_install "$@"
+      ;;
+    uninstall)
+      cmd_uninstall "$@"
+      ;;
+    user)
+      cmd_user "$@"
+      ;;
+    start|stop|restart|status|enable|disable)
+      cmd_service "$cmd" "$@"
+      ;;
+    tui)
+      cmd_tui "$@"
+      ;;
+    *)
+      usage >&2
+      die "unknown command: ${cmd}"
+      ;;
+  esac
+}
+
+# Only run when executed directly, so tests can source this file.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi

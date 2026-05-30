@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, dev]
+  pull_request:
+
+jobs:
+  lint:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Lint sources
+        run: shellcheck ss-easy lib/*.sh build.sh
+      - name: Build and lint the bundle
+        run: |
+          bash build.sh
+          shellcheck dist/ss-easy
+
+  test:
+    name: bats
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats-core
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run unit tests
+        run: bats tests/
+
+  build:
+    name: build bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and syntax-check
+        run: |
+          bash build.sh
+          bash -n dist/ss-easy
+          test -x dist/ss-easy
+
+  # Docker integration matrix (debian + rocky) — full install -> user add ->
+  # uninstall lifecycle on both distro families.
+  # TODO(Task 11): implement integration scripts and enable this job.
+  #
+  # integration:
+  #   name: integration (${{ matrix.image }})
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       image: [debian:stable-slim, rockylinux:9]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Lifecycle test in ${{ matrix.image }}
+  #       run: docker run --rm -v "$PWD":/src "${{ matrix.image }}" /src/tests/integration/run.sh
