@@ -3013,7 +3013,7 @@ users_show() {
 # the strip markers below when assembling dist/ss-easy.
 
 # Version of the tool itself (not the pinned ss-rust release in SS_RUST_VERSION).
-SS_EASY_VERSION="1.0.2"
+SS_EASY_VERSION="1.0.3"
 
 # --- Usage / version --------------------------------------------------------
 

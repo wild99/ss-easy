@@ -21,26 +21,34 @@ users and the service — no Linux expertise required.
 ### Quick start (one-liner)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.2/install.sh | sudo bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.3/install.sh)"
 ```
 
 This downloads the version-pinned, **SHA256-verified** bundle, installs the
 dependencies and the shadowsocks-rust binary, creates your first user, opens the
 firewall, enables BBR, starts the service, and prints the connection link + QR.
 
+> **Why not `curl … | sudo bash`?** Piping the script *into* `sudo` leaves `sudo`'s
+> stdin attached to the pipe, not your keyboard. On distros where `sudo` uses a
+> pseudo-terminal (e.g. Ubuntu 24.04's default `use_pty`), the interactive dialogs
+> can't read arrow keys — they leak as `^[[` escape codes. Running the script as a
+> `sudo bash -c "$(…)"` argument (or the two-step below) keeps the terminal attached.
+> Already root? Drop the `sudo`. Want a non-interactive install? Use `--silent` (below).
+
 ### Silent / unattended install
 
-Flags after `bash -s --` are forwarded to `ss-easy install`:
+Silent mode asks nothing and uses safe defaults (random high port, crypto-random
+secret, auto-detected public IP). It needs no terminal, so a plain pipe is fine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.2/install.sh | sudo bash -s -- --silent
+curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.3/install.sh | sudo bash -s -- --silent
 ```
 
-Silent mode asks nothing and uses safe defaults (random high port, crypto-random
-secret, auto-detected public IP). Override any of them:
+Override any default (two-step keeps flags readable):
 
 ```bash
-... | sudo bash -s -- --silent --port 8443 --method chacha20-ietf-poly1305 --name alice
+curl -fsSL https://raw.githubusercontent.com/wild99/ss-easy/v1.0.3/install.sh -o ss-easy-install.sh
+sudo bash ss-easy-install.sh --silent --port 8443 --method chacha20-ietf-poly1305 --name alice
 ```
 
 ### Alternative: clone and review first (recommended for the cautious)
@@ -56,7 +64,7 @@ sudo ./ss-easy install
 The bundle's checksum is committed next to it and re-verified in CI:
 
 ```bash
-tag=v1.0.2
+tag=v1.0.3
 base="https://raw.githubusercontent.com/wild99/ss-easy/$tag"
 curl -fsSL "$base/dist/ss-easy" -o ss-easy
 curl -fsSL "$base/checksums/bootstrap.sha256" | sed "s#dist/##" | sha256sum -c -

@@ -51,10 +51,17 @@ make_output_stub() {
 # Run a snippet in a fresh bash sourcing common+service with the overridden
 # paths and a chosen PATH prefix. Usage: run_env "<extra PATH dir>" "<snippet>"
 run_env() {
-  local extra_path="$1" snippet="$2"
+  local extra_path="$1" snippet="$2" pure="${3:-}"
+  # Default: prepend the stub dir to the host PATH (stubs win, real coreutils
+  # remain available). When $pure is set, use ONLY the stub dir — needed by the
+  # "no systemctl" test, which must NOT inherit a systemctl from the host PATH
+  # (otherwise it fails on any systemd host). The code paths exercised in pure
+  # mode reach the `command -v systemctl` guard using shell builtins only.
+  local path_expr="$extra_path:$PATH"
+  [ -n "$pure" ] && path_expr="$extra_path"
   bash -c "
     set -euo pipefail
-    PATH='$extra_path:$PATH'
+    PATH='$path_expr'
     export SS_UNIT_FILE='$SS_UNIT_FILE'
     export SS_EASY_ETC='$SS_EASY_ETC'
     export SS_EASY_CONFIG='$SS_EASY_CONFIG'
@@ -251,8 +258,9 @@ EOF
 # --- no systemctl available ------------------------------------------------
 
 @test "start without systemctl in PATH dies actionably" {
-  # Empty stub dir: no systemctl present.
-  run run_env "$TMPDIR_TEST/empty" "service_start"
+  # Pure PATH = only the empty stub dir, so systemctl is genuinely absent
+  # regardless of whether the host has it (robust on systemd dev machines/CI).
+  run run_env "$TMPDIR_TEST/empty" "service_start" pure
   [ "$status" -ne 0 ]
   [[ "$output" == *"systemctl"* ]]
 }
