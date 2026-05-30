@@ -29,15 +29,15 @@ ok()   { printf '[lifecycle] OK: %s\n' "$*"; }
 
 [ -x "$BUNDLE" ] || fail "bundle not found/executable: $BUNDLE (run build.sh)"
 
-# lib/binary.sh resolves the ss-rust checksum table at the RELATIVE path
-# "checksums/ss-rust.sha256" (common.sh hard-exports SS_EASY_CHECKSUMS_DIR=
-# "checksums", so an env override is ineffective for the assembled bundle). The
-# bundle therefore must run with a CWD that contains checksums/. Stage a writable
-# run dir holding a copy of the committed table and invoke the bundle from there.
+# The assembled bundle verifies the ss-rust download against the SHA256 table
+# EMBEDDED in lib/binary.sh (build.sh syncs it from checksums/ss-rust.sha256), so
+# it reads no sibling checksum file at runtime. We still run from a clean writable
+# scratch dir (with a copy of the committed table for convenience/debugging) so
+# the bundle never depends on or writes into the read-only source mount.
 RUNDIR="$(mktemp -d)"
 mkdir -p "$RUNDIR/checksums"
 cp "$REPO/checksums/ss-rust.sha256" "$RUNDIR/checksums/"
-# run_bundle <args...> — invoke the bundle from $RUNDIR so it finds checksums/.
+# run_bundle <args...> — invoke the bundle from $RUNDIR (clean scratch CWD).
 run_bundle() { ( cd "$RUNDIR" && "$BUNDLE" "$@" ); }
 
 # --- systemd / firewall shims (plain container has no systemd as PID 1) ------

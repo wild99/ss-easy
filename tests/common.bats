@@ -36,7 +36,7 @@ teardown() {
     source '$COMMON'
     for v in SS_EASY_ETC SS_EASY_USERS SS_EASY_CONFIG SS_EASY_USERS_DIR \
              SS_RUST_VERSION DEFAULT_METHOD SS_SERVICE_USER SS_SERVER_BIN \
-             SS_SERVICE_NAME SS_EASY_CHECKSUMS_DIR; do
+             SS_SERVICE_NAME; do
       eval "val=\\\"\\\${\$v:-}\\\""
       [ -n \"\$val\" ] || { echo \"empty: \$v\"; exit 1; }
     done

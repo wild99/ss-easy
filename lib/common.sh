@@ -9,7 +9,6 @@
 #     SS_EASY_USERS          user registry path         (users.json)   — source of truth
 #     SS_EASY_CONFIG         generated ss-rust config   (config.json)
 #     SS_EASY_USERS_DIR      per-user access files dir  (users/)
-#     SS_EASY_CHECKSUMS_DIR  repo SHA256 table dir      (checksums/)
 #     SS_SERVICE_NAME        systemd unit name          (ss-easy.service)
 #     SS_SERVICE_USER        dedicated unprivileged service user  — single source of truth
 #     SS_SERVER_BIN          absolute path to ssserver  — single source of truth
@@ -43,12 +42,12 @@ export SS_EASY_USERS="${SS_EASY_ETC}/users.json"
 export SS_EASY_CONFIG="${SS_EASY_ETC}/config.json"
 export SS_EASY_USERS_DIR="${SS_EASY_ETC}/users"
 
-# Repo directory holding the human/CI-readable SHA256 table for the pinned
-# ss-rust binary (checksums/ss-rust.sha256). This is the SOURCE OF TRUTH; the
-# installed single-file bundle does NOT read it (it verifies against the hashes
-# embedded in binary.sh, which build.sh keeps in sync from this file). Relative
-# path: meaningful only from the repo root in dev/CI, never at install time.
-export SS_EASY_CHECKSUMS_DIR="checksums"
+# NOTE: there is intentionally no SS_EASY_CHECKSUMS_DIR constant. The pinned
+# ss-rust SHA256 table (checksums/ss-rust.sha256) is the repo source of truth,
+# but NO runtime module reads it: binary.sh verifies downloads against the hashes
+# EMBEDDED in lib/binary.sh (kept in sync by build.sh from that file). A relative
+# "checksums" path is also meaningless inside the bundle installed at
+# /usr/local/bin, so exposing it as a runtime constant was dead and misleading.
 
 # Single systemd unit running ssserver against the generated config.
 export SS_SERVICE_NAME="ss-easy.service"

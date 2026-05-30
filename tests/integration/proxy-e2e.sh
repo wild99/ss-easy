@@ -61,9 +61,9 @@ trap cleanup EXIT
 # shellcheck source=/dev/null
 . "$REPO/lib/users.sh"
 
-# Point the checksum lookup at the repo's committed table. common.sh exports a
-# relative default ("checksums") on source, so this MUST be set afterwards.
-export SS_EASY_CHECKSUMS_DIR="$REPO/checksums"
+# NOTE: ss_install_binary verifies against the SHA256 table EMBEDDED in
+# lib/binary.sh (build.sh keeps it in sync with checksums/ss-rust.sha256); it
+# reads no sibling checksum file at runtime, so nothing extra is wired here.
 
 # --- 1) install the pinned ssserver binary (real download + verify) ---------
 log "installing pinned ssserver (${SS_RUST_VERSION}) via lib/binary.sh"

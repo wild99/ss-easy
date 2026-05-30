@@ -41,6 +41,37 @@ jobs:
           bash -n dist/ss-easy
           test -x dist/ss-easy
 
+  # Guard against drift between the committed bootstrap checksum and the bundle.
+  # `bash build.sh` is byte-reproducible, so a fresh build must hash to exactly
+  # the value in checksums/bootstrap.sha256 (which install.sh verifies before
+  # exec). If they differ, the published checksum is stale and every curl|bash
+  # install would abort — fail CI here instead (Decision 9 / audit SS-M2). Also
+  # asserts the build is deterministic by building twice and comparing.
+  bundle-checksum:
+    name: bundle checksum gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert dist/ss-easy matches committed bootstrap.sha256 (and is deterministic)
+        run: |
+          bash build.sh
+          h1="$(sha256sum dist/ss-easy | awk '{print $1}')"
+          bash build.sh
+          h2="$(sha256sum dist/ss-easy | awk '{print $1}')"
+          if [ "$h1" != "$h2" ]; then
+            echo "ERROR: build.sh is not deterministic: $h1 != $h2" >&2
+            exit 1
+          fi
+          committed="$(awk '{print $1; exit}' checksums/bootstrap.sha256)"
+          if [ "$h1" != "$committed" ]; then
+            echo "ERROR: dist/ss-easy hash does not match checksums/bootstrap.sha256." >&2
+            echo "  built:     $h1" >&2
+            echo "  committed: $committed" >&2
+            echo "  Regenerate with: sha256sum dist/ss-easy | sed 's#dist/##' > checksums/bootstrap.sha256" >&2
+            exit 1
+          fi
+          echo "OK: bundle hash matches committed bootstrap.sha256 ($h1)."
+
   # Fail if any git-tracked file matches a .gitignore pattern (artifact leak).
   # `git ls-files -ci --exclude-standard` lists tracked-but-ignored files; a
   # non-empty result means an ignored artifact (work/, tmp/, *.log, dist/, ...)

@@ -11,6 +11,8 @@ setup() {
   LINK="$REPO_ROOT/lib/link.sh"
   USERS="$REPO_ROOT/lib/users.sh"
   NETWORK="$REPO_ROOT/lib/network.sh"
+  SERVICE="$REPO_ROOT/lib/service.sh"
+  FIREWALL="$REPO_ROOT/lib/firewall.sh"
   TMPDIR_TEST="$(mktemp -d)"
 
   export SS_EASY_ETC="$TMPDIR_TEST/etc"
@@ -65,6 +67,48 @@ in_env() {
   run in_env "users_validate_name 'имя'";        [ "$status" -ne 0 ]
 }
 
+@test "accented-unicode name rejected even under a UTF-8 locale (SS-M1)" {
+  # Under a glibc *.UTF-8 locale the bash A-Za-z ranges otherwise admit accented
+  # letters; the match must be pinned to LC_ALL=C so they are rejected. Pick a
+  # locale whose collation actually triggers the leak (C.UTF-8 keeps C collation
+  # and does NOT, so it is a non-test); if no such locale is installed, the
+  # LC_ALL=C pin is still exercised by the ASCII assertions below.
+  local utf_locale=""
+  local cand
+  for cand in $(locale -a 2>/dev/null | grep -iE 'utf-?8$' | grep -ivE '^(C|POSIX)'); do
+    if LC_ALL="$cand" bash -c '[[ "café" =~ ^[A-Za-z]+$ ]]' 2>/dev/null; then
+      utf_locale="$cand"; break
+    fi
+  done
+  : "${utf_locale:=C.UTF-8}"
+
+  run bash -c "
+    set -euo pipefail
+    export LC_ALL='$utf_locale' LANG='$utf_locale'
+    source '$COMMON'
+    source '$USERS'
+    users_validate_name 'café'
+  "
+  [ "$status" -ne 0 ]
+  run bash -c "
+    set -euo pipefail
+    export LC_ALL='$utf_locale' LANG='$utf_locale'
+    source '$COMMON'
+    source '$USERS'
+    users_validate_name 'naïve'
+  "
+  [ "$status" -ne 0 ]
+  # A plain ASCII name still passes under the same UTF-8 locale (no over-reject).
+  run bash -c "
+    set -euo pipefail
+    export LC_ALL='$utf_locale' LANG='$utf_locale'
+    source '$COMMON'
+    source '$USERS'
+    users_validate_name 'plain_ascii-1'
+  "
+  [ "$status" -eq 0 ]
+}
+
 # --- CRUD -------------------------------------------------------------------
 
 @test "add creates user, list shows it without secrets" {
@@ -104,6 +148,89 @@ in_env() {
   run jq -r '.users | length' "$SS_EASY_USERS"
   [ "$output" = "0" ]
   [ ! -f "$SS_EASY_USERS_DIR/alice.txt" ]
+}
+
+# --- mutation chain: reload service + adjust firewall (M1) -------------------
+#
+# These tests prove users_add/users_del complete the documented chain
+# (registry -> regenerate -> reload service -> adjust firewall). Mocks for
+# service_reload and firewall_open/close_port append to $CALL_LOG so the call
+# sequence and port arguments can be asserted. _users_service_installed is
+# overridden to "installed" so the guarded reload is actually attempted.
+mut_env() {
+  bash -c "
+    set -euo pipefail
+    source '$COMMON'
+    SS_EASY_ETC='$SS_EASY_ETC'
+    SS_EASY_USERS='$SS_EASY_USERS'
+    SS_EASY_CONFIG='$SS_EASY_CONFIG'
+    SS_EASY_USERS_DIR='$SS_EASY_USERS_DIR'
+    source '$CONFIG'
+    source '$LINK'
+    source '$SERVICE'
+    source '$FIREWALL'
+    source '$USERS'
+    CALL_LOG='$CALL_LOG'
+    # Mocks: record each side-effect call (verb + args) to the log.
+    service_reload()     { printf 'service_reload\n'            >>\"\$CALL_LOG\"; return 0; }
+    firewall_open_port()  { printf 'firewall_open_port %s %s\n'  \"\$1\" \"\$2\" >>\"\$CALL_LOG\"; return 0; }
+    firewall_close_port() { printf 'firewall_close_port %s %s\n' \"\$1\" \"\$2\" >>\"\$CALL_LOG\"; return 0; }
+    # The unit is 'installed' so the guarded reload is attempted.
+    _users_service_installed() { return 0; }
+    $1
+  "
+}
+
+@test "user add reloads service and opens the new user's port (tcp+udp)" {
+  CALL_LOG="$TMPDIR_TEST/calls.log"; : > "$CALL_LOG"
+  mut_env "config_init; users_add 'alice' '2022-blake3-aes-256-gcm' >/dev/null"
+  port="$(jq -r '.users[0].port' "$SS_EASY_USERS")"
+  # Service reloaded so ssserver picks up the regenerated config.
+  grep -qx 'service_reload' "$CALL_LOG"
+  # Firewall opened for the allocated port, both protocols.
+  grep -qx "firewall_open_port ${port} tcp" "$CALL_LOG"
+  grep -qx "firewall_open_port ${port} udp" "$CALL_LOG"
+}
+
+@test "user del reloads service and closes the removed user's port (tcp+udp)" {
+  CALL_LOG="$TMPDIR_TEST/calls.log"; : > "$CALL_LOG"
+  mut_env "config_init; users_add 'alice' '2022-blake3-aes-256-gcm' >/dev/null"
+  port="$(jq -r '.users[0].port' "$SS_EASY_USERS")"
+  : > "$CALL_LOG"   # reset so we only see the del side-effects
+  mut_env "users_del 'alice'"
+  grep -qx 'service_reload' "$CALL_LOG"
+  grep -qx "firewall_close_port ${port} tcp" "$CALL_LOG"
+  grep -qx "firewall_close_port ${port} udp" "$CALL_LOG"
+}
+
+@test "user add succeeds with no service/firewall present (guarded skip path)" {
+  # Realistic slim/test host: no systemd unit, no ufw/firewalld backend. The real
+  # (un-mocked) guards must warn-and-skip, and the registry mutation must still
+  # succeed end-to-end. Override only the probes that detect the absent world, so
+  # the genuine warn+skip branches in _users_reload_service / firewall_open_port
+  # run. service_reload is NOT mocked here: if the guard were broken and called
+  # it, _service_require_systemctl would die — proving the skip really happens.
+  run bash -c "
+    set -euo pipefail
+    source '$COMMON'
+    SS_EASY_ETC='$SS_EASY_ETC'
+    SS_EASY_USERS='$SS_EASY_USERS'
+    SS_EASY_CONFIG='$SS_EASY_CONFIG'
+    SS_EASY_USERS_DIR='$SS_EASY_USERS_DIR'
+    source '$CONFIG'
+    source '$LINK'
+    source '$SERVICE'
+    source '$FIREWALL'
+    source '$USERS'
+    _users_service_installed() { return 1; }   # no systemd unit -> skip reload
+    firewall_detect_backend()  { REPLY=''; return 1; }  # no firewall -> warn+skip
+    config_init
+    users_add 'bob' '2022-blake3-aes-256-gcm' >/dev/null
+  "
+  [ "$status" -eq 0 ]
+  # The user was still added despite no service/firewall.
+  run jq -r '.users[0].name' "$SS_EASY_USERS"
+  [ "$output" = "bob" ]
 }
 
 @test "show nonexistent fails with not-found message" {

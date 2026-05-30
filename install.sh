@@ -15,18 +15,19 @@
 # compromised CDN is caught by the checksum mismatch and aborts the install
 # before a single byte of the downloaded bundle is executed.
 #
-# THE CHECKSUM IS PRODUCED BY RELEASE CI, NOT BY HAND.
-#   The build is NOT byte-reproducible: `bash build.sh` on two machines yields
-#   two different `dist/ss-easy` hashes. The canonical `checksums/bootstrap.sha256`
-#   is therefore generated and committed by the release pipeline for the exact
-#   tagged `dist/ss-easy` artifact it publishes. The generation step is simply:
+# THE CHECKSUM IS COMMITTED ALONGSIDE THE BUNDLE AND VERIFIED IN CI.
+#   `bash build.sh` is byte-reproducible: building twice yields the same
+#   `dist/ss-easy` hash. The committed `checksums/bootstrap.sha256` is therefore
+#   the SHA256 of the committed `dist/ss-easy`, regenerated whenever the bundle
+#   changes via:
 #
 #       sha256sum dist/ss-easy | sed 's#dist/##' > checksums/bootstrap.sha256
 #
-#   run on the tagged build, so the committed line is `<hash>  ss-easy`. This
-#   bootstrap verifies the downloaded bundle against THAT published value. A
-#   local rebuild will produce a different hash and (correctly) fail this check
-#   unless checksums/bootstrap.sha256 is regenerated for the local bundle.
+#   so the committed line is `<hash>  ss-easy`. The CI `bundle-checksum` job
+#   rebuilds the bundle and FAILS if its hash differs from this committed value,
+#   preventing drift between the published bundle and its bootstrap checksum.
+#   This bootstrap verifies the downloaded bundle against that committed value
+#   before executing a single byte (verify-before-exec).
 #
 # Usage (the README one-liner):
 #   curl -fsSL https://raw.githubusercontent.com/youruser/ss-easy/<tag>/install.sh | sudo bash
