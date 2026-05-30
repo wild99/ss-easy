@@ -2,14 +2,15 @@
 #
 # ss-easy — turnkey shadowsocks-rust installer & manager (entrypoint).
 #
-# Thin dispatcher: parse the subcommand and route it to a handler. The real
-# business logic lives in lib/*.sh (filled in by later tasks); here the handlers
-# are stubs so the skeleton builds, lints and is testable.
+# Thin dispatcher: parse the subcommand and its flags, enforce the root guard
+# where a command mutates the system, and route into the lib/*.sh modules that
+# own all the real logic. The dispatcher itself contains no business logic — it
+# only parses and routes (Decision 10: secrets never pass through a log here).
 #
 # Two run modes are supported:
-#   - dev:    this file sources lib/common.sh from a sibling lib/ directory.
-#   - bundle: build.sh concatenates lib/*.sh ahead of this body, so common.sh is
-#             already present; the dev source line is neutralised at build time.
+#   - dev:    this file sources lib/*.sh from a sibling lib/ directory.
+#   - bundle: build.sh concatenates lib/*.sh ahead of this body, so the modules
+#             are already present; the dev source block is stripped at build time.
 
 set -euo pipefail
 
@@ -20,55 +21,124 @@ set -euo pipefail
 # build:strip-start
 if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
   _SS_EASY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  # shellcheck source=lib/common.sh
-  . "${_SS_EASY_DIR}/lib/common.sh"
+  # common.sh first (every other module depends on it), then the rest in a
+  # stable order. Each is sourced only if present so the dispatcher still loads
+  # while sibling tasks are landing.
+  for _ss_mod in common preflight pkg binary config users link network service \
+                 firewall install uninstall tui; do
+    if [ -f "${_SS_EASY_DIR}/lib/${_ss_mod}.sh" ]; then
+      # shellcheck source=/dev/null
+      . "${_SS_EASY_DIR}/lib/${_ss_mod}.sh"
+    fi
+  done
+  unset _ss_mod
 fi
 # build:strip-end
 
-# --- Usage ------------------------------------------------------------------
+# Version of the tool itself (not the pinned ss-rust release in SS_RUST_VERSION).
+SS_EASY_VERSION="1.0.0"
+
+# --- Usage / version --------------------------------------------------------
 
 usage() {
   cat <<'EOF'
 Usage: ss-easy <command> [options]
 
 Commands:
-  install              Install and configure shadowsocks-rust
-  uninstall            Remove the service, config, binary and users
-  user <add|del|list|show> [name]
-                       Manage users
-  start                Start the ss-easy service
-  stop                 Stop the ss-easy service
-  restart              Restart the ss-easy service
-  status               Show service status
-  enable               Enable the service at boot
-  disable              Disable the service at boot
-  tui                  Launch the interactive whiptail menu
+  install [--silent] [--method M] [--port P] [--ip ADDR] [--name N]
+                       Install and configure shadowsocks-rust.
+                       --silent: no prompts (random port, crypto secret, auto IP).
+  uninstall [--purge]  Remove the service, config, binary and users.
+  user add <name> [--method M]
+                       Add a user (auto port + crypto secret).
+  user del <name>      Remove a user.
+  user list            List users (no secrets).
+  user show <name>     Show a user's connection details and ss:// link.
+  start                Start the ss-easy service.
+  stop                 Stop the ss-easy service.
+  restart              Restart the ss-easy service.
+  status               Show service status.
+  enable               Enable the service at boot.
+  disable              Disable the service at boot.
+  tui                  Launch the interactive whiptail menu (also the default
+                       when no command is given).
 
 Options:
-  -h, --help           Show this help and exit
+  -h, --help           Show this help and exit.
+  --version            Show the version and exit.
 EOF
 }
 
-# --- Subcommand stubs -------------------------------------------------------
-# Each handler is a placeholder wired up by a later task. They accept and ignore
-# their arguments so the dispatcher contract is testable today.
+version() {
+  printf 'ss-easy %s (ss-rust %s)\n' "$SS_EASY_VERSION" "${SS_RUST_VERSION:-unknown}"
+}
 
-cmd_install()   { log_info "install: not implemented yet"; }
-cmd_uninstall() { log_info "uninstall: not implemented yet"; }
-cmd_user()      { log_info "user: not implemented yet"; }
-cmd_tui()       { log_info "tui: not implemented yet"; }
+# --- user subcommand --------------------------------------------------------
 
+# cmd_user <add|del|list|show> [args...] — route the user verbs into users.sh.
+# Mutating verbs (add/del) require root; read-only verbs (list/show) do not.
+cmd_user() {
+  local sub="${1:-}"
+  shift || true
+  case "$sub" in
+    add)
+      require_root
+      [ "$#" -ge 1 ] || { usage >&2; die "user add: a name is required"; }
+      local name="$1"; shift
+      # An optional --method flag selects the cipher; default lives in users.sh.
+      local method=""
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --method)   method="${2:?--method requires an argument}"; shift 2 ;;
+          --method=*) method="${1#*=}"; shift ;;
+          *) die "user add: unknown option '$1'" ;;
+        esac
+      done
+      if [ -n "$method" ]; then users_add "$name" "$method"; else users_add "$name"; fi
+      ;;
+    del|delete|remove)
+      require_root
+      [ "$#" -ge 1 ] || { usage >&2; die "user del: a name is required"; }
+      users_del "$1"
+      ;;
+    list)
+      users_list
+      ;;
+    show)
+      [ "$#" -ge 1 ] || { usage >&2; die "user show: a name is required"; }
+      users_show "$1"
+      ;;
+    ''|*)
+      usage >&2
+      die "user: expected one of add|del|list|show (got: '${sub}')"
+      ;;
+  esac
+}
+
+# --- service lifecycle ------------------------------------------------------
+
+# cmd_service <verb> — route a lifecycle verb into service.sh. Mutating verbs
+# need root; status is read-only.
 cmd_service() {
-  # Shared stub for lifecycle verbs; the verb is the first argument.
-  log_info "$1: not implemented yet"
+  local verb="$1"
+  case "$verb" in
+    start)   require_root; service_start ;;
+    stop)    require_root; service_stop ;;
+    restart) require_root; service_restart ;;
+    enable)  require_root; service_enable ;;
+    disable) require_root; service_disable ;;
+    status)  service_status ;;
+    *) usage >&2; die "unknown service verb: ${verb}" ;;
+  esac
 }
 
 # --- Dispatcher -------------------------------------------------------------
 
 main() {
+  # No command -> launch the interactive menu (the friendly default).
   if [ "$#" -eq 0 ]; then
-    usage >&2
-    die "no command given"
+    tui_main
+    return $?
   fi
 
   local cmd="$1"
@@ -78,11 +148,16 @@ main() {
     -h|--help|help)
       usage
       ;;
+    --version|version)
+      version
+      ;;
     install)
-      cmd_install "$@"
+      require_root
+      do_install "$@"
       ;;
     uninstall)
-      cmd_uninstall "$@"
+      require_root
+      do_uninstall "$@"
       ;;
     user)
       cmd_user "$@"
@@ -91,7 +166,7 @@ main() {
       cmd_service "$cmd" "$@"
       ;;
     tui)
-      cmd_tui "$@"
+      tui_main "$@"
       ;;
     *)
       usage >&2

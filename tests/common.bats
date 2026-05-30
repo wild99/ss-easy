@@ -152,10 +152,18 @@ teardown() {
   [[ "$output" == *"unknown command"* || "$output" == *"Usage"* || "$output" == *"usage"* ]]
 }
 
-@test "dispatcher with no command prints usage and exits non-zero" {
-  run bash "$ENTRY"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"Usage"* || "$output" == *"usage"* ]]
+@test "dispatcher with no command launches the TUI (the default action)" {
+  # Source the entrypoint with main guarded off, stub tui_main, then call main
+  # with no arguments: the friendly default is the interactive menu, not an error.
+  run bash -c "
+    _SS_EASY_COMMON_LOADED=1
+    source '$COMMON'
+    tui_main() { echo TUI_LAUNCHED; }
+    source '$ENTRY'
+    main
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"TUI_LAUNCHED"* ]]
 }
 
 @test "--help prints usage and exits 0" {
@@ -164,10 +172,26 @@ teardown() {
   [[ "$output" == *"Usage"* || "$output" == *"usage"* ]]
 }
 
-@test "known subcommands are dispatched (stub) and exit 0" {
-  for cmd in install uninstall user start stop restart status enable disable tui; do
-    run bash "$ENTRY" "$cmd"
+@test "known subcommands are routed to their handlers" {
+  # Source the entrypoint with the root guard and every leaf handler stubbed, so
+  # routing is observable without root, systemd, or real side effects. Each
+  # command must reach its handler and exit 0.
+  for cmd in install uninstall start stop restart status enable disable tui; do
+    run bash -c "
+      _SS_EASY_COMMON_LOADED=1
+      source '$COMMON'
+      require_root() { :; }
+      do_install()  { echo ROUTED:install; }
+      do_uninstall(){ echo ROUTED:uninstall; }
+      tui_main()    { echo ROUTED:tui; }
+      service_start(){ echo ROUTED; }; service_stop(){ echo ROUTED; }
+      service_restart(){ echo ROUTED; }; service_status(){ echo ROUTED; }
+      service_enable(){ echo ROUTED; }; service_disable(){ echo ROUTED; }
+      source '$ENTRY'
+      main '$cmd'
+    "
     [ "$status" -eq 0 ] || { echo "failed: $cmd (status $status)"; false; }
+    [[ "$output" == *"ROUTED"* ]] || { echo "not routed: $cmd"; false; }
   done
 }
 
