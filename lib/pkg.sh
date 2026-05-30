@@ -26,6 +26,7 @@ _SS_EASY_PKG_LOADED=1
 # Depend on common.sh (die, logging). In the assembled bundle the modules are
 # inlined and the guard is already set, so this is a no-op there; in dev/test
 # the module sources its sibling so it is usable standalone.
+# build:strip-start
 if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
   # Resolve our own directory with pure-bash parameter expansion (no external
   # dirname), so the module sources cleanly even under a restricted test PATH.
@@ -36,6 +37,7 @@ if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
   . "${_ss_pkg_dir}/common.sh"
   unset _ss_pkg_self _ss_pkg_dir
 fi
+# build:strip-end
 
 # Runtime dependencies (tech-spec Dependencies + Decision 7: jq). Same package
 # names on apt and dnf/yum, so no per-family name mapping is needed today.

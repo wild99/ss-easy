@@ -15,12 +15,15 @@ set -euo pipefail
 
 # --- Module loading (dev mode) ---------------------------------------------
 # In the assembled bundle the modules are inlined above and _SS_EASY_COMMON_LOADED
-# is already set, so this block is a no-op. build.sh strips it anyway.
+# is already set, so this block is a no-op. build.sh deletes everything between
+# the strip markers below when assembling dist/ss-easy.
+# build:strip-start
 if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
   _SS_EASY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   # shellcheck source=lib/common.sh
   . "${_SS_EASY_DIR}/lib/common.sh"
 fi
+# build:strip-end
 
 # --- Usage ------------------------------------------------------------------
 

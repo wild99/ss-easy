@@ -35,6 +35,7 @@ _SS_EASY_PREFLIGHT_LOADED=1
 # Depend on common.sh (die, logging, require_root). In the assembled bundle the
 # modules are inlined and the guard is already set, so this is a no-op there;
 # in dev/test the module sources its sibling so it is usable standalone.
+# build:strip-start
 if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
   # Resolve our own directory with pure-bash parameter expansion (no external
   # dirname), so the module sources cleanly even under a restricted test PATH.
@@ -45,6 +46,7 @@ if [ -z "${_SS_EASY_COMMON_LOADED:-}" ]; then
   . "${_ss_pf_dir}/common.sh"
   unset _ss_pf_self _ss_pf_dir
 fi
+# build:strip-end
 
 # Tunable defaults; tests override them per-call via the environment.
 : "${OS_RELEASE:=/etc/os-release}"
