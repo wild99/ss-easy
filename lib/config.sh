@@ -47,12 +47,28 @@ _config_require_registry() {
     || die "registry is not valid JSON: $SS_EASY_USERS"
 }
 
-# _config_ensure_dir — create the base dir 0700 if missing; assert perms.
+# _config_grant_service <mode> <path> — apply <mode>, and when the dedicated
+# service group exists, group-own <path> by it so the unprivileged systemd service
+# user can reach/read the generated config WITHOUT exposing it to other local
+# users. Guarded: in non-install contexts (tests) the group is absent, so <path>
+# stays root-owned with <mode> applied.
+_config_grant_service() {
+  local mode="$1" path="$2"
+  chmod "$mode" "$path" || die "cannot chmod ${mode}: $path"
+  if command -v getent >/dev/null 2>&1 && getent group "$SS_SERVICE_USER" >/dev/null 2>&1; then
+    chgrp "$SS_SERVICE_USER" "$path" 2>/dev/null || true
+  fi
+}
+
+# _config_ensure_dir — create the base dir if missing; assert perms. 0710 + the
+# service group lets the unprivileged service user TRAVERSE to the generated
+# config (not list the dir); users.json / users/ inside keep 0600/0700 so the
+# secret registry stays root-only.
 _config_ensure_dir() {
   if [ ! -d "$SS_EASY_ETC" ]; then
     mkdir -p "$SS_EASY_ETC" || die "cannot create directory: $SS_EASY_ETC"
   fi
-  chmod 700 "$SS_EASY_ETC" || die "cannot chmod 0700: $SS_EASY_ETC"
+  _config_grant_service 710 "$SS_EASY_ETC"
 }
 
 # _config_write_users <stdin> — atomically replace users.json (0600) from stdin.
@@ -207,5 +223,8 @@ config_generate() {
   _config_ensure_dir
   printf '%s\n' "$out" | atomic_write "$SS_EASY_CONFIG" \
     || die "failed to write config: $SS_EASY_CONFIG"
-  chmod 600 "$SS_EASY_CONFIG" || die "cannot chmod 0600: $SS_EASY_CONFIG"
+  # 0640 + service group: the systemd service runs as the unprivileged service
+  # user and must READ this generated config (it carries the proxy keys). It is
+  # not world-readable, and the 0600 users.json registry is never read by it.
+  _config_grant_service 640 "$SS_EASY_CONFIG"
 }

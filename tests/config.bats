@@ -203,9 +203,12 @@ in_env() {
 
 # --- permissions ------------------------------------------------------------
 
-@test "file perms are 0600 and dir 0700 after write" {
+@test "perms: dir 0710, users.json 0600 (root-only), config.json 0640 (service-readable)" {
   in_env "config_init; config_user_add 'alice' 18342 'm' 's' 'c'; config_generate"
-  [ "$(stat -c '%a' "$SS_EASY_ETC")" = "700" ]
+  # Dir 0710: service user may traverse to config.json (no service group in tests,
+  # so it stays root-owned). users.json stays 0600 (secret registry, root-only).
+  # config.json is 0640 so the unprivileged systemd service user can read it.
+  [ "$(stat -c '%a' "$SS_EASY_ETC")" = "710" ]
   [ "$(stat -c '%a' "$SS_EASY_USERS")" = "600" ]
-  [ "$(stat -c '%a' "$SS_EASY_CONFIG")" = "600" ]
+  [ "$(stat -c '%a' "$SS_EASY_CONFIG")" = "640" ]
 }
