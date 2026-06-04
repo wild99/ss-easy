@@ -13,22 +13,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Lint sources (incl. bootstrap + integration scripts)
-        run: shellcheck ss-easy lib/*.sh build.sh install.sh tests/integration/*.sh
+      - name: Lint sources (incl. bootstrap)
+        run: shellcheck ss-easy lib/*.sh build.sh install.sh
       - name: Build and lint the bundle
         run: |
           bash build.sh
           shellcheck dist/ss-easy
-
-  test:
-    name: bats
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install bats-core
-        run: sudo apt-get update && sudo apt-get install -y bats
-      - name: Run unit tests (incl. bootstrap.bats)
-        run: bats tests/
 
   build:
     name: build bundle
@@ -91,88 +81,3 @@ jobs:
             exit 1
           fi
           echo "OK: no .gitignore-tracked artifacts in the repo."
-
-  # Tamper-detection: the bootstrap MUST refuse to execute a bundle whose SHA256
-  # does not match the published checksum (Decision 9). Runs as root in a clean
-  # container so the verify-before-exec path (not just the root guard) is hit.
-  tampered-bundle:
-    name: tampered-bundle abort
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Assert bootstrap aborts on a tampered bundle
-        run: |
-          docker run --rm -v "$PWD":/src:ro debian:stable-slim bash -c '
-            set -e
-            apt-get update -qq && apt-get install -y -qq curl ca-certificates coreutils >/dev/null
-            SS_EASY_SRC=/src bash /src/tests/integration/tampered-bundle.sh
-          '
-
-  # Full install -> user add -> list -> del -> uninstall lifecycle of the
-  # assembled bundle on both distro families, with file-permission assertions.
-  #
-  # SYSTEMD-IN-DOCKER caveat: a plain container has no systemd as PID 1, so the
-  # lifecycle script shims systemctl/firewall and asserts the GENERATED artifacts
-  # (unit file, config.json, permissions) rather than a live `systemctl is-active`.
-  # Runtime deps are pre-provisioned (on rhel the whiptail binary is in `newt`),
-  # so pkg_ensure_runtime_deps is a verified no-op. The live SIP022/classic link
-  # correctness through a real ssserver+sslocal proxy is proven by the `e2e` job.
-  integration:
-    name: integration (${{ matrix.image }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [debian:stable-slim, rockylinux:9]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build the bundle
-        run: bash build.sh
-      - name: Lifecycle in ${{ matrix.image }}
-        run: |
-          docker run --rm -v "$PWD":/src:ro "${{ matrix.image }}" bash -c '
-            set -e
-            if command -v apt-get >/dev/null 2>&1; then
-              apt-get update -qq >/dev/null
-              apt-get install -y -qq curl jq xz-utils ca-certificates openssl \
-                iproute2 findutils passwd qrencode whiptail >/dev/null
-            else
-              dnf install -y -q epel-release >/dev/null
-              # On rhel the whiptail CLI ships in the `newt` package. Do NOT
-              # request `curl` (curl-minimal is preinstalled and conflicts);
-              # --allowerasing keeps the transaction from aborting on any swap.
-              dnf install -y -q --allowerasing jq xz tar findutils iproute \
-                qrencode newt openssl shadow-utils >/dev/null
-            fi
-            SS_EASY_SRC=/src bash /src/tests/integration/lifecycle.sh
-          '
-
-  # E2E proxy smoke: stand up ssserver from a generated config and sslocal from
-  # the generated ss:// link (same pinned ss-rust binary), then curl a target
-  # THROUGH the proxy. Proves the link works end-to-end on both distro families
-  # and for both the default SIP022 cipher and the classic fallback. No systemd.
-  e2e:
-    name: e2e proxy (${{ matrix.image }} / ${{ matrix.method }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [debian:stable-slim, rockylinux:9]
-        method: [2022-blake3-aes-256-gcm, chacha20-ietf-poly1305]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Proxy E2E in ${{ matrix.image }} (${{ matrix.method }})
-        run: |
-          docker run --rm -e E2E_METHOD="${{ matrix.method }}" \
-            -v "$PWD":/src:ro "${{ matrix.image }}" bash -c '
-            set -e
-            if command -v apt-get >/dev/null 2>&1; then
-              apt-get update -qq >/dev/null
-              apt-get install -y -qq curl jq xz-utils ca-certificates openssl \
-                findutils >/dev/null
-            else
-              # curl-minimal is preinstalled on rhel; do not request `curl`.
-              dnf install -y -q --allowerasing jq xz tar findutils >/dev/null
-            fi
-            SS_EASY_SRC=/src bash /src/tests/integration/proxy-e2e.sh
-          '

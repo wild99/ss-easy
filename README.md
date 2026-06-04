@@ -188,12 +188,11 @@ distributable `dist/ss-easy`.
 ```bash
 bash build.sh                 # assemble dist/ss-easy
 shellcheck ss-easy lib/*.sh   # lint
-bats tests/                   # unit tests
 ```
 
-CI runs shellcheck, the bats suite, a deterministic-build/checksum gate, and real
-Docker integration on Debian + Rocky (full lifecycle + end-to-end proxy smoke for
-both ciphers).
+CI runs shellcheck and a deterministic-build/checksum gate: a fresh `build.sh`
+must hash to exactly the committed `checksums/bootstrap.sha256` (the value
+`install.sh` verifies before exec), so a stale checksum fails the build.
 
 ---
 

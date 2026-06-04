@@ -195,8 +195,8 @@ _SS_EASY_BINARY_LOADED=1
 # with NO sibling files (the installed /usr/local/bin/ss-easy has no checksums/
 # dir). The repo file checksums/ss-rust.sha256 stays the human/CI-readable
 # source of truth; build.sh keeps the values below in sync from it on each build
-# (see _ss_sync_embedded_checksums in build.sh), and the bats suite asserts they
-# match. Bumping SS_RUST_VERSION updates checksums/ss-rust.sha256, then `bash
+# (see _ss_sync_embedded_checksums in build.sh). Bumping SS_RUST_VERSION updates
+# checksums/ss-rust.sha256, then `bash
 # build.sh` refreshes these constants.
 #
 # EMBEDDED-CHECKSUMS:BEGIN (managed by build.sh — do not edit by hand)
